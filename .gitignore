@@ -38,4 +38,4 @@ Cargo.lock
 thumbs.db
 
 # --- 工作模組定義 ---
-docs/
+/docs/
