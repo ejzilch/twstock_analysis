@@ -1,0 +1,41 @@
+# --- Rust 相關 ---
+# 編譯產物 高消耗 Token
+/target/
+# 備份檔案
+**/*.rs.bk
+# 如果是 Library 專案通常不忽略，但分析專案建議忽略或讓 AI 略過
+Cargo.lock
+
+# --- 股票數據檔案 ---
+# 下載的歷史股價數據
+*.csv
+# API 回傳的原始資料
+*.json
+# 高效能資料儲存格式
+*.parquet
+# SQLite 或其他本地資料庫
+*.db
+*.sqlite
+# 所有分析數據
+/data/
+# 分析圖表、回測報告
+/outputs/
+
+# --- 安全與環境變數 ---
+# 所有 API Keys
+.env
+# 其他環境設定檔
+.env.*
+
+# --- 系統與開發工具 ---
+# VS Code 設定（若有個人偏好設定）
+.vscode/
+# JetBrains 系列（如果之後有用）
+.idea/
+# Mac 系統檔案
+.DS_Store
+# Windows 縮圖快取
+thumbs.db
+
+# --- 工作模組定義 ---
+docs/

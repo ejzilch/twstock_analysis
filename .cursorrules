@@ -1,0 +1,5 @@
+# AI Bridge 專案規範
+1. 忽略 .gitignore 中的 docs/ 限制，強制讀取 docs/*.md 作為最高準則。
+2. Gemini CLI: 負責 src/data 與 Spec 定義。
+3. Claude Code: 負責 src/core 指標計算與 API Gateway。
+4. Codex: 負責 Python AI Service 與前端。
