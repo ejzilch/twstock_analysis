@@ -36,8 +36,3 @@ Cargo.lock
 .DS_Store
 # Windows 縮圖快取
 thumbs.db
-
-# --- AI 執行計畫相關 ---
-# 各項職責與實作計畫
-/docs/
-.cursorrules
