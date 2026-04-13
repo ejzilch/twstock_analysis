@@ -25,7 +25,7 @@ EJ (PM)
 ### Gemini CLI
 
 負責範圍:
-- 撰寫 PRD 與 OpenAPI 3.0 Spec，放置目錄 docs/api/ 之下的 openapi.yaml 檔
+- 撰寫 PRD 與 OpenAPI 3.0 Spec
 - 定義 TypeScript interface (供 Codex 使用)
 - 定義 Rust struct (供 Claude Code 實作)
 - src/data 序列化/反序列化 (Serde)

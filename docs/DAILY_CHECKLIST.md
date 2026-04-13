@@ -126,6 +126,11 @@ EJ 確認:
 - [ ] Spec 已更新 (若有 API 變更)
 - [ ] symbols table migration 已執行
 - [ ] Python requirements.txt 含 msgpack
+- [ ] 生產環境 .env 已設定，所有欄位無空值
+- [ ] API_KEY 已設定為隨機強密鑰（建議 openssl rand -hex 32）
+- [ ] FINMIND_API_TOKEN 已確認有效，可正常呼叫 API
+- [ ] .env 未提交進 git（確認 git status 無 .env）
+- [ ] NEXT_PUBLIC_API_BASE_URL 指向正確的生產環境位址
 
 部署順序 (固定，不可顛倒):
 1. DB migrations (含 symbols table)
@@ -266,6 +271,7 @@ EJ 確認:
 - 2.0 (2026-04-11): 新增程式碼規範檢查項目
 - 2.1 (2026-04-11): 資料來源、Bulk Insert、Symbol 同步、分頁、認證
 - 2.2 (2026-04-11): BridgeError 檢查、Observability 指標巡視、Graceful Shutdown 關閉順序
+- 2.3 (2026-04-11): 部署前新增環境變數檢查項目
 
 批准: EJ (PM)
 下次審查: 2026-04-25

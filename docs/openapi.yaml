@@ -1,0 +1,935 @@
+openapi: 3.0.3
+info:
+  title: AI Bridge API
+  description: |
+    股票分析與 AI 交易信號系統 API。
+    所有 timestamp 欄位為毫秒級 UTC integer（13 位）。
+    所有浮點數值保證 is_finite() == true，不傳遞 Inf 或 NaN。
+    認證方式：Header 攜帶 X-API-KEY。
+  version: 2.2.0
+
+servers:
+  - url: /api/v1
+
+security:
+  - ApiKeyAuth: []
+
+# ── 路徑定義 ──────────────────────────────────────────────────────────────────
+
+paths:
+
+  # /health 與 /health/integrity 不屬於 /api/v1 前綴
+  # 透過 operation-level servers 覆寫為根路徑
+  /health:
+    get:
+      summary: System health check
+      description: 回傳各元件健康狀態，部分元件不可用時回傳 degraded。
+      tags: [Health]
+      security: []   # health check 不需要認證
+      servers:
+        - url: /
+      responses:
+        '200':
+          description: OK（含降級狀態）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /health/integrity:
+    get:
+      summary: DB/Cache consistency and observability check
+      description: EJ 每日巡視用。比對 DB 與 Redis 快取，回傳 Observability 指標。
+      tags: [Health]
+      security: []
+      servers:
+        - url: /
+      responses:
+        '200':
+          description: OK（含降級狀態）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegrityResponse'
+
+  /symbols:
+    get:
+      summary: Get list of stock symbols
+      description: 回傳系統動態管理的股票清單，每日從 FinMind 同步。
+      tags: [Symbols]
+      parameters:
+        - name: exchange
+          in: query
+          description: 交易所篩選
+          schema:
+            type: string
+            enum: [TWSE, TPEX]
+        - name: is_active
+          in: query
+          description: 是否只回傳上市中的標的，預設 true
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SymbolsResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /candles/{symbol}:
+    get:
+      summary: Get candlestick data with optional indicators
+      description: |
+        單次請求最多回傳 2000 根 K 線。
+        超過範圍回傳 400 QUERY_RANGE_TOO_LARGE。
+        使用 next_cursor 分頁取得後續資料。
+      tags: [Market Data]
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          description: 股票代號，如 "2330"
+          schema:
+            type: string
+        - name: from_ms
+          in: query
+          required: true
+          description: 開始時間戳（毫秒）
+          schema:
+            type: integer
+            format: int64
+        - name: to_ms
+          in: query
+          required: true
+          description: 結束時間戳（毫秒）
+          schema:
+            type: integer
+            format: int64
+        - name: interval
+          in: query
+          description: K 線時間粒度，預設 1h
+          schema:
+            type: string
+            enum: [1m, 5m, 15m, 1h, 4h, 1d]
+            default: 1h
+        - name: indicators
+          in: query
+          description: 逗號分隔的指標名稱，如 "ma20,rsi,macd"
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          description: 分頁游標，由上一頁 response 的 next_cursor 提供
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandlesResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: Symbol not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /indicators/compute:
+    post:
+      summary: Compute technical indicators dynamically
+      description: |
+        支援動態參數化指標請求。
+        計算順序由 Rust IndicatorFactory 依 DAG 拓撲排序自動決定。
+        回應包含 dag_execution_order 供驗證。
+      tags: [Indicators]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ComputeIndicatorsRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputeIndicatorsResponse'
+        '400':
+          description: Bad Request（含 INVALID_INDICATOR_CONFIG）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          description: Computation overflow
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Indicator compute failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /signals/{symbol}:
+    get:
+      summary: Get trading signals
+      description: |
+        AI 服務正常時回傳 source=ai_ensemble。
+        AI 超時或不可用時自動降級，回傳 source=technical_only，
+        fallback_reason 標注原因。
+      tags: [Signals]
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: from_ms
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: to_ms
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignalsResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: Symbol not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: AI service timeout（已自動降級）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /predict:
+    post:
+      summary: Get AI model prediction
+      description: |
+        Rust Gateway 轉發至 Python AI Service。
+        Python 端保證 up_probability + down_probability == 1.0。
+        所有數值 is_finite() == true。
+      tags: [AI]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PredictionRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PredictionResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '503':
+          description: AI service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: AI service timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /backtest:
+    post:
+      summary: Run backtest
+      description: |
+        回測引擎透過 POST /api/v1/indicators/compute 取得 Rust 指標，
+        確保與實盤計算結果一致。
+      tags: [Backtest]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BacktestRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BacktestResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+# ── Schema 定義 ───────────────────────────────────────────────────────────────
+
+components:
+  schemas:
+
+    # ── Health ────────────────────────────────────────────────────────────────
+
+    HealthResponse:
+      type: object
+      required: [status, timestamp_ms, components, version]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        timestamp_ms:
+          type: integer
+          format: int64
+        components:
+          type: object
+          required: [database, redis, python_ai_service]
+          properties:
+            database:
+              type: string
+              enum: [ok, unavailable]
+            redis:
+              type: string
+              enum: [ok, unavailable]
+            python_ai_service:
+              type: string
+              enum: [ok, unavailable]
+        version:
+          type: string
+
+    IntegrityResponse:
+      type: object
+      required: [status, timestamp_ms, checks, observability]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, error]
+        timestamp_ms:
+          type: integer
+          format: int64
+        checks:
+          type: object
+          required: [cache_db_consistency, indicator_dag_order, python_ai_service, data_source]
+          properties:
+            cache_db_consistency:
+              type: object
+              required: [status, sample_size, max_deviation_pct]
+              properties:
+                status:
+                  type: string
+                  enum: [ok, mismatch]
+                sample_size:
+                  type: integer
+                max_deviation_pct:
+                  type: number
+                note:
+                  type: string
+                  nullable: true
+            indicator_dag_order:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [ok, error]
+                last_execution_ms:
+                  type: integer
+                  format: int64
+            python_ai_service:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [ok, unavailable]
+                last_response_ms:
+                  type: integer
+            data_source:
+              type: object
+              required: [primary, status, rate_limit_remaining_pct]
+              properties:
+                primary:
+                  type: string
+                  enum: [finmind, yfinance]
+                status:
+                  type: string
+                  enum: [ok, rate_limited]
+                fallback:
+                  type: string
+                  nullable: true
+                rate_limit_remaining_pct:
+                  type: number
+        observability:
+          type: object
+          required:
+            - data_latency_seconds
+            - data_latency_status
+            - ai_inference_p99_ms
+            - ai_inference_status
+            - api_success_rate_pct
+            - api_success_rate_status
+            - bridge_errors_last_hour
+          properties:
+            data_latency_seconds:
+              type: integer
+              description: 最新 K 線時間與當前時間差值（秒），告警閾值 300
+            data_latency_status:
+              type: string
+              enum: [ok, warning, critical]
+            ai_inference_p99_ms:
+              type: integer
+              description: AI 推論 P99 耗時（毫秒），告警閾值 200
+            ai_inference_status:
+              type: string
+              enum: [ok, warning, critical]
+            api_success_rate_pct:
+              type: number
+              description: 最近 1 小時 API 成功率，告警閾值 99%
+            api_success_rate_status:
+              type: string
+              enum: [ok, warning, critical]
+            bridge_errors_last_hour:
+              type: integer
+              description: 最近 1 小時 BridgeError 發生次數，告警閾值 5
+
+    # ── Symbols ───────────────────────────────────────────────────────────────
+
+    SymbolsResponse:
+      type: object
+      required: [symbols, count, last_synced_ms]
+      properties:
+        symbols:
+          type: array
+          items:
+            $ref: '#/components/schemas/Symbol'
+        count:
+          type: integer
+        last_synced_ms:
+          type: integer
+          format: int64
+
+    Symbol:
+      type: object
+      required:
+        - symbol
+        - name
+        - exchange
+        - data_source
+        - earliest_available_ms
+        - latest_available_ms
+        - is_active
+        - updated_at_ms
+      properties:
+        symbol:
+          type: string
+          example: "2330"
+        name:
+          type: string
+          example: "台積電"
+        exchange:
+          type: string
+          enum: [TWSE, TPEX]
+        data_source:
+          type: string
+          enum: [finmind, yfinance]
+        earliest_available_ms:
+          type: integer
+          format: int64
+        latest_available_ms:
+          type: integer
+          format: int64
+        is_active:
+          type: boolean
+        updated_at_ms:
+          type: integer
+          format: int64
+
+    # ── Candles ───────────────────────────────────────────────────────────────
+
+    CandlesResponse:
+      type: object
+      required:
+        - symbol
+        - interval
+        - from_ms
+        - to_ms
+        - candles
+        - count
+        - total_available
+        - source
+        - cached
+        - computed_at_ms
+      properties:
+        symbol:
+          type: string
+        interval:
+          type: string
+          enum: [1m, 5m, 15m, 1h, 4h, 1d]
+        from_ms:
+          type: integer
+          format: int64
+        to_ms:
+          type: integer
+          format: int64
+        candles:
+          type: array
+          items:
+            $ref: '#/components/schemas/CandleItem'
+        count:
+          type: integer
+          description: 本次回傳的 K 線數量
+        total_available:
+          type: integer
+          description: 符合條件的總 K 線數量
+        next_cursor:
+          type: string
+          nullable: true
+          description: 分頁游標，null 表示已取完
+        source:
+          type: string
+          enum: [database, cache]
+        cached:
+          type: boolean
+        computed_at_ms:
+          type: integer
+          format: int64
+
+    CandleItem:
+      type: object
+      required: [timestamp_ms, open, high, low, close, volume]
+      properties:
+        timestamp_ms:
+          type: integer
+          format: int64
+        open:
+          type: number
+          format: double
+        high:
+          type: number
+          format: double
+        low:
+          type: number
+          format: double
+        close:
+          type: number
+          format: double
+        volume:
+          type: integer
+          format: int64
+        indicators:
+          type: object
+          additionalProperties: true
+          description: 動態指標結果，key 為指標名稱（如 ma20、rsi14、macd）
+
+    # ── Indicators ────────────────────────────────────────────────────────────
+
+    ComputeIndicatorsRequest:
+      type: object
+      required: [request_id, symbol, from_ms, to_ms, interval, indicators]
+      properties:
+        request_id:
+          type: string
+          description: 冪等性識別碼，格式建議 "req-YYYYMMDD-NNN"
+        symbol:
+          type: string
+        from_ms:
+          type: integer
+          format: int64
+        to_ms:
+          type: integer
+          format: int64
+        interval:
+          type: string
+          enum: [1m, 5m, 15m, 1h, 4h, 1d]
+        indicators:
+          type: object
+          description: |
+            指標參數，支援兩種格式：
+            - 參數列表型：{ "ma": [5, 20, 50], "rsi": [14] }
+            - 具名參數型：{ "bollinger": { "period": 20, "std_dev_multiplier": 2.0 } }
+          additionalProperties: true
+
+    ComputeIndicatorsResponse:
+      type: object
+      required:
+        - symbol
+        - interval
+        - from_ms
+        - to_ms
+        - indicators
+        - computed_at_ms
+        - computation_time_ms
+        - cached
+        - dag_execution_order
+      properties:
+        symbol:
+          type: string
+        interval:
+          type: string
+        from_ms:
+          type: integer
+          format: int64
+        to_ms:
+          type: integer
+          format: int64
+        indicators:
+          type: object
+          additionalProperties: true
+          description: key 為指標名稱，value 為時間序列陣列（如 [150.0, 150.1]）
+        computed_at_ms:
+          type: integer
+          format: int64
+        computation_time_ms:
+          type: integer
+        cached:
+          type: boolean
+        dag_execution_order:
+          type: array
+          items:
+            type: string
+          description: 指標實際計算順序，供驗證 DAG 拓撲排序結果
+
+    # ── Signals ───────────────────────────────────────────────────────────────
+
+    SignalsResponse:
+      type: object
+      required: [symbol, from_ms, to_ms, signals, count]
+      properties:
+        symbol:
+          type: string
+        from_ms:
+          type: integer
+          format: int64
+        to_ms:
+          type: integer
+          format: int64
+        signals:
+          type: array
+          items:
+            $ref: '#/components/schemas/Signal'
+        count:
+          type: integer
+
+    Signal:
+      type: object
+      required:
+        - id
+        - timestamp_ms
+        - signal_type
+        - confidence
+        - entry_price
+        - target_price
+        - stop_loss
+        - reason
+        - source
+        - reliability
+      properties:
+        id:
+          type: string
+        timestamp_ms:
+          type: integer
+          format: int64
+        signal_type:
+          type: string
+          enum: [BUY, SELL]   # HOLD 不在規範內
+        confidence:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+        entry_price:
+          type: number
+          format: double
+        target_price:
+          type: number
+          format: double
+        stop_loss:
+          type: number
+          format: double
+        reason:
+          type: string
+        source:
+          type: string
+          enum: [ai_ensemble, technical_only, manual_override]
+        reliability:
+          type: string
+          enum: [high, medium, low, unknown]
+        fallback_reason:
+          type: string
+          nullable: true
+          description: AI 降級時的原因，如 "AI_SERVICE_TIMEOUT"
+
+    # ── AI Predict ────────────────────────────────────────────────────────────
+
+    PredictionRequest:
+      type: object
+      required: [request_id, symbol, indicators, lookback_hours]
+      properties:
+        request_id:
+          type: string
+        symbol:
+          type: string
+        indicators:
+          type: object
+          additionalProperties:
+            type: number
+          description: 指標名稱與數值的 key-value，如 { "ma20": 150.5, "rsi": 55.2 }
+        lookback_hours:
+          type: integer
+          minimum: 1
+
+    PredictionResponse:
+      type: object
+      required:
+        - symbol
+        - up_probability
+        - down_probability
+        - confidence_score
+        - model_version
+        - inference_time_ms
+        - computed_at_ms
+      properties:
+        symbol:
+          type: string
+        up_probability:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+        down_probability:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+        confidence_score:
+          type: number
+          format: double
+        model_version:
+          type: string
+        inference_time_ms:
+          type: integer
+        computed_at_ms:
+          type: integer
+          format: int64
+
+    # ── Backtest ──────────────────────────────────────────────────────────────
+
+    BacktestRequest:
+      type: object
+      required:
+        - request_id
+        - symbol
+        - strategy_name
+        - from_ms
+        - to_ms
+        - initial_capital
+        - position_size_percent
+      properties:
+        request_id:
+          type: string
+        symbol:
+          type: string
+        strategy_name:
+          type: string
+        from_ms:
+          type: integer
+          format: int64
+        to_ms:
+          type: integer
+          format: int64
+        initial_capital:
+          type: number
+          format: double
+          minimum: 0.0
+        position_size_percent:
+          type: number
+          format: double
+          minimum: 1.0
+          maximum: 100.0
+
+    BacktestResponse:
+      type: object
+      required:
+        - backtest_id
+        - symbol
+        - strategy_name
+        - from_ms
+        - to_ms
+        - initial_capital
+        - final_capital
+        - metrics
+        - created_at_ms
+      properties:
+        backtest_id:
+          type: string
+        symbol:
+          type: string
+        strategy_name:
+          type: string
+        from_ms:
+          type: integer
+          format: int64
+        to_ms:
+          type: integer
+          format: int64
+        initial_capital:
+          type: number
+          format: double
+        final_capital:
+          type: number
+          format: double
+        metrics:
+          $ref: '#/components/schemas/BacktestMetrics'
+        created_at_ms:
+          type: integer
+          format: int64
+
+    BacktestMetrics:
+      type: object
+      required:
+        - total_trades
+        - winning_trades
+        - losing_trades
+        - win_rate
+        - profit_factor
+        - max_drawdown
+        - sharpe_ratio
+        - annual_return
+      properties:
+        total_trades:
+          type: integer
+        winning_trades:
+          type: integer
+        losing_trades:
+          type: integer
+        win_rate:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+        profit_factor:
+          type: number
+          format: double
+        max_drawdown:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+        sharpe_ratio:
+          type: number
+          format: double
+        annual_return:
+          type: number
+          format: double
+
+    # ── Error ─────────────────────────────────────────────────────────────────
+
+    ErrorResponse:
+      type: object
+      required: [error_code, message, fallback_available, timestamp_ms]
+      properties:
+        error_code:
+          type: string
+          enum:
+            - UNAUTHORIZED
+            - AI_SERVICE_TIMEOUT
+            - AI_SERVICE_UNAVAILABLE
+            - DATA_SOURCE_INTERRUPTED
+            - DATA_SOURCE_RATE_LIMITED
+            - INDICATOR_COMPUTE_FAILED
+            - CACHE_MISS_FALLBACK
+            - COMPUTATION_OVERFLOW
+            - INVALID_INDICATOR_CONFIG
+            - SYMBOL_NOT_FOUND
+            - QUERY_RANGE_TOO_LARGE
+        message:
+          type: string
+        fallback_available:
+          type: boolean
+        timestamp_ms:
+          type: integer
+          format: int64
+        request_id:
+          type: string
+          nullable: true
+
+  # ── 安全機制 ──────────────────────────────────────────────────────────────
+
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-KEY
+
+  # ── 共用 Response ─────────────────────────────────────────────────────────
+
+  responses:
+    UnauthorizedError:
+      description: X-API-KEY 缺少或無效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
