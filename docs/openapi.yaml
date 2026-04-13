@@ -736,7 +736,8 @@ components:
           type: object
           additionalProperties:
             type: number
-          description: 指標名稱與數值的 key-value，如 { "ma20": 150.5, "rsi": 55.2 }
+          description: >
+            指標名稱與數值的 key-value，如 { "ma20": 150.5, "rsi": 55.2 }
         lookback_hours:
           type: integer
           minimum: 1

@@ -9,11 +9,11 @@
 
 EJ 確認以下項目簽核後才能開工:
 
-- [ ] Gemini 已完成 OpenAPI Spec 撰寫
-- [ ] TypeScript interface 已從 Spec 生成
-- [ ] Rust struct 已定義
-- [ ] EJ 已簽核 Spec
-- [ ] Mock server 已部署
+- [X] Gemini 已完成 OpenAPI Spec 撰寫
+- [X] TypeScript interface 已從 Spec 生成
+- [X] Rust struct 已定義
+- [X] EJ 已簽核 Spec
+- [X] Mock server 已部署
 
 ---
 
@@ -38,9 +38,9 @@ tsc --noEmit
 ```
 
 程式碼自查:
-- [ ] 每個函數只做一件事，無 God function
-- [ ] 優先使用「自我解釋型」命名 (Self-Documenting Code)，禁止單字元或無意義縮寫
-- [ ] 如需註解單行註解控制在 10 到 15 Words內，程式碼註解禁止使用 emoji
+- [X] 每個函數只做一件事，無 God function
+- [X] 優先使用「自我解釋型」命名 (Self-Documenting Code)，禁止單字元或無意義縮寫
+- [X] 如需註解單行註解控制在 10 到 15 Words內，程式碼註解禁止使用 emoji
 - [ ] Rust: 無 .unwrap()，pub function 有 doc comment
 - [ ] Rust: 金融數值使用 checked_add / checked_mul
 - [ ] Rust: candles 查詢超過 2000 根時回傳 400 QUERY_RANGE_TOO_LARGE
@@ -51,8 +51,8 @@ tsc --noEmit
 - [ ] Python: 回測未自行計算指標 (必須呼叫 Rust API)
 - [ ] Python: 非 2xx 回應使用 error envelope 格式
 - [ ] Python: msgpack 已列入 requirements.txt
-- [ ] Gemini: yfinance 未出現在即時資料路徑
-- [ ] Gemini: Bulk Insert 批次 COMMIT 後才統一 DEL redis keys
+- [X] Gemini: yfinance 未出現在即時資料路徑
+- [X] Gemini: Bulk Insert 批次 COMMIT 後才統一 DEL redis keys
 - [ ] Frontend: symbol 清單從 GET /api/v1/symbols 動態載入，未寫死
 - [ ] Frontend: 已處理 QUERY_RANGE_TOO_LARGE, DATA_SOURCE_RATE_LIMITED error_code
 - [ ] 無 breaking changes，或已通知所有人並提供遷移計畫
@@ -272,6 +272,7 @@ EJ 確認:
 - 2.1 (2026-04-11): 資料來源、Bulk Insert、Symbol 同步、分頁、認證
 - 2.2 (2026-04-11): BridgeError 檢查、Observability 指標巡視、Graceful Shutdown 關閉順序
 - 2.3 (2026-04-11): 部署前新增環境變數檢查項目
+- 2.4 (2026-04-13): EJ reviewed，簽署部分項目
 
 批准: EJ (PM)
 下次審查: 2026-04-25
