@@ -1,38 +1,49 @@
-# --- Rust 相關 ---
-# 編譯產物 高消耗 Token
-/target/
-# 備份檔案
-**/*.rs.bk
-# 如果是 Library 專案通常不忽略，但分析專案建議忽略或讓 AI 略過
-Cargo.lock
-
-# --- 股票數據檔案 ---
-# 下載的歷史股價數據
-*.csv
-# API 回傳的原始資料
-*.json
-# 高效能資料儲存格式
-*.parquet
-# SQLite 或其他本地資料庫
-*.db
-*.sqlite
-# 所有分析數據
-/data/
-# 分析圖表、回測報告
-/outputs/
-
-# --- 安全與環境變數 ---
-# 所有 API Keys
+# ── 機敏資料（絕對不可提交）────────────────────────────────────────────────────
 .env
-# 其他環境設定檔
-.env.*
+.env.local
+.env.production
+.env.staging
 
-# --- 系統與開發工具 ---
-# VS Code 設定（若有個人偏好設定）
-.vscode/
-# JetBrains 系列（如果之後有用）
-.idea/
-# Mac 系統檔案
+# ── Rust ──────────────────────────────────────────────────────────────────────
+target/
+Cargo.lock        # 若為 library crate 則忽略，binary crate 可保留
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+dist/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 模型檔案（體積大，透過其他方式管理）
+*.pkl
+*.joblib
+*.h5
+models/
+
+# ── Frontend (Next.js) ────────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+frontend/.env.local
+
+# 從 OpenAPI Spec 自動生成，不需要提交
+frontend/src/types/api.generated.ts
+
+# ── 資料庫 ────────────────────────────────────────────────────────────────────
+*.sql.bak
+pg_dump/
+
+# ── 系統與編輯器 ──────────────────────────────────────────────────────────────
 .DS_Store
-# Windows 縮圖快取
-thumbs.db
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/settings.json   # 個人設定不提交，但 .vscode/extensions.json 可提交

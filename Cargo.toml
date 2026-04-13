@@ -1,20 +1,56 @@
 [package]
 name = "twstock_analysis"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
-axum = "0.7"
+# ── Web Framework ─────────────────────────────────────────────────────────────
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "limit", "trace"] }
+
+# ── Async Runtime ─────────────────────────────────────────────────────────────
 tokio = { version = "1.0", features = ["full"] }
+
+# ── Serialization ─────────────────────────────────────────────────────────────
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono"] }
-redis = { version = "0.25", features = ["tokio-comp"] }
-reqwest = { version = "0.12", features = ["json"] }
+rmp-serde = "1.3"   # MsgPack，對應序列化格式策略
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlx = { version = "0.8", features = [
+    "runtime-tokio-rustls",
+    "postgres",
+    "chrono",
+    "macros",   # query! / query_as! macro 支援
+    "uuid",     # Signal ID 存入 DB
+] }
+
+# ── Cache ─────────────────────────────────────────────────────────────────────
+redis = { version = "0.26", features = ["tokio-comp"] }
+
+# ── HTTP Client ───────────────────────────────────────────────────────────────
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+
+# ── Time ──────────────────────────────────────────────────────────────────────
 chrono = { version = "0.4", features = ["serde"] }
+
+# ── ID 生成 ───────────────────────────────────────────────────────────────────
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# ── 錯誤處理 ──────────────────────────────────────────────────────────────────
 anyhow = "1.0"
 thiserror = "1.0"
+
+# ── 日誌 ──────────────────────────────────────────────────────────────────────
 tracing = "0.1"
-tracing-subscriber = "0.3"
-rmp-serde = "1.3" # For MsgPack support
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# ── 環境變數 ──────────────────────────────────────────────────────────────────
 dotenvy = "0.15"
+
+[dev-dependencies]
+# 整合測試用的非同步測試 macro
+tokio-test = "0.4"
+# HTTP 測試客戶端，用於 API handler 整合測試
+axum-test = "0.1"

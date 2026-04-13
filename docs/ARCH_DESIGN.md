@@ -107,11 +107,18 @@ pub enum DataSource {
 }
 
 // src/models/candle.rs (Gemini)
+// 內部 domain model，供 IndicatorFactory 與 SignalAggregator 使用
+// 不直接序列化為 API response，對外格式由 src/api/models/response.rs 負責
 pub struct Candle {
-    pub symbol: String,
+    pub symbol:       String,
+    pub interval:     String,
     pub timestamp_ms: i64,
-    pub close: f64,
-    pub volume: u64,
+    pub open:         f64,
+    pub high:         f64,
+    pub low:          f64,
+    pub close:        f64,
+    pub volume:       u64,     // 不可為負，對齊 RawCandle
+    pub indicators:   HashMap<String, IndicatorValue>,
 }
 
 // src/models/symbol.rs (Gemini)
@@ -126,11 +133,62 @@ pub struct SymbolMeta {
 }
 
 // src/models/indicators.rs (Gemini)
-pub struct Indicators {
-    pub ma20: Option<f64>,
-    pub ma50: Option<f64>,
-    pub rsi: Option<f64>,
-    pub macd: Option<MacdValue>,
+// 指標值的允許形態，限制只能是純量或 MACD 結構，禁止 serde_json::Value
+#[serde(untagged)]
+pub enum IndicatorValue {
+    Scalar(f64),        // MA, RSI, Bollinger 單一數值
+    Macd(MacdValue),    // MACD 三線結構
+}
+
+// MACD 指標結構，對應 API_CONTRACT.md 的 macd response 欄位
+pub struct MacdValue {
+    pub macd_line:   f64,
+    pub signal_line: f64,
+    pub histogram:   f64,
+}
+
+// src/api/models/response.rs (Claude Code)
+// 對外 API 的 K 線單筆資料，從 Candle domain model 轉換而來
+pub struct CandleResponse {
+    pub timestamp_ms: i64,
+    pub open:         f64,
+    pub high:         f64,
+    pub low:          f64,
+    pub close:        f64,
+    pub volume:       u64,
+    pub indicators:   HashMap<String, IndicatorValue>,
+}
+
+// 對外 API 的完整 candles response，含分頁與 meta 資訊
+// 對應 API_CONTRACT.md GET /api/v1/candles/{symbol} response 格式
+pub struct CandlesApiResponse {
+    pub symbol:          String,
+    pub interval:        String,
+    pub from_ms:         i64,
+    pub to_ms:           i64,
+    pub candles:         Vec<CandleResponse>,
+    pub count:           usize,
+    pub total_available: usize,
+    pub next_cursor:     Option<String>,
+    pub source:          String,
+    pub cached:          bool,
+    pub computed_at_ms:  i64,
+}
+
+// Candle -> CandleResponse 轉換，在 handler 層執行
+// domain model 與 response struct 完全解耦，API 格式變動不影響核心計算
+impl From<Candle> for CandleResponse {
+    fn from(candle: Candle) -> Self {
+        Self {
+            timestamp_ms: candle.timestamp_ms,
+            open:         candle.open,
+            high:         candle.high,
+            low:          candle.low,
+            close:        candle.close,
+            volume:       candle.volume,
+            indicators:   candle.indicators,
+        }
+    }
 }
 
 // src/api/models/response.rs (Claude Code)
@@ -585,6 +643,7 @@ src/api/
 - 2.0 (2026-04-11): 合併 TECH_SPEC，更新角色分工
 - 2.1 (2026-04-11): Bulk Insert、DataSource、Symbol 管理、FinMind 限流、WebSocket 預留
 - 2.2 (2026-04-11): BridgeError 設計、序列化格式策略、Graceful Shutdown
+- 2.3 (2026-04-11): Candle domain model 與 API response struct 分離，新增 IndicatorValue enum
 
 批准: EJ (PM)
 下次審查: 2026-04-25
