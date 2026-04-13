@@ -513,7 +513,7 @@ Non-breaking (可在同版本更新):
 
 | 角色 | 狀態 | 日期 |
 |------|------|------|
-| EJ (PM) | 待簽核 | |
+| EJ (PM) | 已簽核 | 2026-04-13 |
 | Gemini CLI | 待簽核 | |
 | Claude Code | 待簽核 | |
 | OpenAI Codex | 待簽核 | |
