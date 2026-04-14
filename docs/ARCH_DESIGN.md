@@ -93,6 +93,7 @@ src/
 pub struct RawCandle {
     pub symbol: String,
     pub timestamp_ms: i64,
+    pub interval: Interval,
     pub open: f64,
     pub high: f64,
     pub low: f64,
@@ -111,7 +112,7 @@ pub enum DataSource {
 // 不直接序列化為 API response，對外格式由 src/api/models/response.rs 負責
 pub struct Candle {
     pub symbol:       String,
-    pub interval:     String,
+    pub interval:     Interval,
     pub timestamp_ms: i64,
     pub open:         f64,
     pub high:         f64,
@@ -125,7 +126,7 @@ pub struct Candle {
 pub struct SymbolMeta {
     pub symbol: String,
     pub name: String,
-    pub exchange: String,
+    pub exchange: Exchange,
     pub data_source: DataSource,
     pub earliest_available_ms: i64,
     pub latest_available_ms: i64,
@@ -163,14 +164,14 @@ pub struct CandleResponse {
 // 對應 API_CONTRACT.md GET /api/v1/candles/{symbol} response 格式
 pub struct CandlesApiResponse {
     pub symbol:          String,
-    pub interval:        String,
+    pub interval:        Interval,
     pub from_ms:         i64,
     pub to_ms:           i64,
     pub candles:         Vec<CandleResponse>,
     pub count:           usize,
     pub total_available: usize,
     pub next_cursor:     Option<String>,
-    pub source:          String,
+    pub source:          FetchSource,
     pub cached:          bool,
     pub computed_at_ms:  i64,
 }
@@ -642,8 +643,9 @@ src/api/
 - 1.0 (2026-04-10): 初版
 - 2.0 (2026-04-11): 合併 TECH_SPEC，更新角色分工
 - 2.1 (2026-04-11): Bulk Insert、DataSource、Symbol 管理、FinMind 限流、WebSocket 預留
-- 2.2 (2026-04-11): BridgeError 設計、序列化格式策略、Graceful Shutdown
-- 2.3 (2026-04-11): Candle domain model 與 API response struct 分離，新增 IndicatorValue enum
+- 2.2 (2026-04-12): BridgeError 設計、序列化格式策略、Graceful Shutdown
+- 2.3 (2026-04-13): Candle domain model 與 API response struct 分離，新增 IndicatorValue enum
+- 2.4 (2026-04-14): RawCandle 補上 interval 欄位，Candle/SymbolMeta 的 String 欄位改為強型別 enum
 
 批准: EJ (PM)
 下次審查: 2026-04-25

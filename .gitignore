@@ -25,7 +25,7 @@ htmlcov/
 *.pkl
 *.joblib
 *.h5
-models/
+/ai_service/models/
 
 # ── Frontend (Next.js) ────────────────────────────────────────────────────────
 node_modules/

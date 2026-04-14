@@ -1,7 +1,7 @@
 # AI Bridge - 開發流程檢查清單
 
-版本: 2.2
-更新日期: 2026-04-11
+版本: 2.4
+更新日期: 2026-04-14
 
 ---
 
@@ -56,6 +56,7 @@ tsc --noEmit
 - [ ] Frontend: symbol 清單從 GET /api/v1/symbols 動態載入，未寫死
 - [ ] Frontend: 已處理 QUERY_RANGE_TOO_LARGE, DATA_SOURCE_RATE_LIMITED error_code
 - [ ] 無 breaking changes，或已通知所有人並提供遷移計畫
+- [ ] 無魔法數字，具業務語義的數值已定義於 src/constants.rs
 
 Commit message 格式:
 ```
@@ -83,6 +84,8 @@ Breaking changes: none
 - [ ] 無 emoji 出現在程式碼註解中
 - [ ] Rust: 無 .unwrap()，錯誤正確傳遞
 - [ ] Python: 數值輸出範圍檢查
+- [ ] 無裸數字或裸字串出現在業務邏輯中
+- [ ] 新增常數已放入 src/constants.rs 並標注來源
 
 錯誤橋接:
 - [ ] BridgeError variant 是否涵蓋所有 Python 失敗情境
@@ -272,7 +275,7 @@ EJ 確認:
 - 2.1 (2026-04-11): 資料來源、Bulk Insert、Symbol 同步、分頁、認證
 - 2.2 (2026-04-11): BridgeError 檢查、Observability 指標巡視、Graceful Shutdown 關閉順序
 - 2.3 (2026-04-11): 部署前新增環境變數檢查項目
-- 2.4 (2026-04-13): EJ reviewed，簽署部分項目
+- 2.4 (2026-04-13): EJ reviewed，簽署部分項目，禁用魔法術字
 
 批准: EJ (PM)
 下次審查: 2026-04-25

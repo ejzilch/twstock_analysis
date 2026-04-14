@@ -1,7 +1,8 @@
+use crate::models::Interval;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::models::candle::{IndicatorValue, MacdValue};
+use crate::models::candle::IndicatorValue;
 
 /// POST /api/v1/indicators/compute 的請求結構
 ///
@@ -14,7 +15,7 @@ pub struct ComputeIndicatorsRequest {
     pub symbol: String,
     pub from_ms: i64,
     pub to_ms: i64,
-    pub interval: String,
+    pub interval: Interval,
     pub indicators: HashMap<String, IndicatorConfig>,
 }
 
@@ -50,7 +51,7 @@ pub struct BollingerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComputeIndicatorsResponse {
     pub symbol: String,
-    pub interval: String,
+    pub interval: Interval,
     pub from_ms: i64,
     pub to_ms: i64,
     pub indicators: HashMap<String, Vec<IndicatorValue>>,

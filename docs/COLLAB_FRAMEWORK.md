@@ -79,6 +79,8 @@ PM 驗收點:
 - 前端代碼
 - 在 handler 內直接寫 SQL
 - 對外暴露 Python traceback 或內部 BridgeError 細節
+- 禁止在程式碼中硬寫 API 錯誤碼字串，一律引用 src/constants.rs 的常數
+- 禁止在 API 層使用 String 表示有限合法值的欄位，一律使用 src/api/models/enums.rs 的 enum
 
 ---
 
@@ -177,7 +179,9 @@ PM 驗收點 (前端):
 - 金融數值計算使用 checked_add / checked_mul，溢位時回傳 COMPUTATION_OVERFLOW
 - 指標 Factory 透過拓撲排序決定計算順序，循環依賴回傳 400 error
 - candles 查詢超過 2000 根時回傳 400 QUERY_RANGE_TOO_LARGE，不自動截斷
-- BridgeError 每個 variant 必須對應 tracing::error! 或 tracing::warn! 記錄
+- BridgeError 每個 variant 必須對應 tracing::error! 或 tracing::warn! 記錄+
+- 有限合法值的欄位禁止使用 String，一律使用 src/models/enums.rs 或 src/api/models/enums.rs 的對應 enum
+- 錯誤碼字串禁止硬寫，一律引用 src/constants.rs 的常數（待產出）
 
 ### Python 具體規範
 
@@ -187,6 +191,8 @@ PM 驗收點 (前端):
 - 禁止在回測引擎中自行計算任何技術指標
 - 非 2xx 回應必須使用 error envelope 格式，traceback 欄位為選填
 - 需在 requirements.txt 中列入 msgpack
+- 禁止 hardcoded 數值（原有規範已有，但需明確對齊 constants.rs 的概念）
+- Python 端的業務數值定義於 ai_service/constants.py，與 Rust 端分開管理
 
 ### TypeScript 具體規範
 
@@ -310,6 +316,7 @@ Python FastAPI 同樣監聽 SIGTERM，完成推論後才關閉。
 | 對前端暴露 Python traceback | PR 退回 |
 | Python 非 2xx 未使用 error envelope | PR 退回 |
 | Rust 強行終止未走 Graceful Shutdown | 視為嚴重事故 |
+| 有限合法值欄位使用 String（如 interval、exchange、signal_type） | Code review 拒絕 |
 
 ---
 
@@ -337,6 +344,7 @@ Python FastAPI 同樣監聽 SIGTERM，完成推論後才關閉。
 | 3.1 | 2026-04-11 | FinMind 限流、Bulk Insert、動態 Symbol、WebSocket 計畫 |
 | 3.2 | 2026-04-11 | BridgeError 規範、序列化格式管理、Graceful Shutdown、Observability |
 | 3.3 | 2026-04-11 | Codex 前端職責補齊，新增前端 PM 驗收點與禁止清單，對齊 FRONTEND_SPEC.md |
+| 3.4 | 2026-04-14 | 新增 enum 強型別規範，禁止硬寫有限合法值字串 |
 
 批准: EJ (PM)
 下次審查: 2026-04-25

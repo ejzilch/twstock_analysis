@@ -1,3 +1,4 @@
+use crate::models::Interval;
 use serde::{Deserialize, Serialize};
 
 /// 外部資料來源
@@ -34,7 +35,7 @@ pub struct FetchParams {
     pub symbol: String,
     pub from_ms: i64,
     pub to_ms: i64,
-    pub interval: String, // "1m" / "5m" / "15m" / "1h" / "4h" / "1d"
+    pub interval: Interval, // "1m" / "5m" / "15m" / "1h" / "4h" / "1d"
     pub source: DataSource,
 }
 
@@ -47,6 +48,7 @@ pub struct FetchParams {
 pub struct RawCandle {
     pub symbol: String,
     pub timestamp_ms: i64,
+    pub interval: Interval,
     pub open: f64,
     pub high: f64,
     pub low: f64,

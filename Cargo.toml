@@ -53,4 +53,4 @@ dotenvy = "0.15"
 # 整合測試用的非同步測試 macro
 tokio-test = "0.4"
 # HTTP 測試客戶端，用於 API handler 整合測試
-axum-test = "0.1"
+axum-test = "18.0.0-rc3"
