@@ -1,3 +1,4 @@
+use crate::constants;
 use crate::data::models::RawCandle;
 use sqlx::{PgPool, Postgres, QueryBuilder};
 use std::collections::HashSet;
@@ -35,10 +36,10 @@ impl BulkInsertBuffer {
     /// 建立新的緩衝區，容量預先分配 500 筆
     pub fn new() -> Self {
         Self {
-            buffer: Vec::with_capacity(500),
+            buffer: Vec::with_capacity(constants::BULK_INSERT_MAX_BATCH_SIZE),
             last_flush_at: Instant::now(),
-            max_batch_size: 500,
-            max_wait_ms: 1000,
+            max_batch_size: constants::BULK_INSERT_MAX_BATCH_SIZE,
+            max_wait_ms: constants::BULK_INSERT_MAX_WAIT_MS,
         }
     }
 
@@ -122,7 +123,7 @@ async fn execute_bulk_insert(pool: &PgPool, items: &[RawCandle]) -> anyhow::Resu
     query_builder.push_values(items, |mut b, item| {
         b.push_bind(&item.symbol)
             .push_bind(item.timestamp_ms)
-            .push_bind(&item.interval)
+            .push_bind(item.interval.as_str())
             .push_bind(item.open)
             .push_bind(item.high)
             .push_bind(item.low)
@@ -146,7 +147,7 @@ async fn invalidate_caches(
     redis_client: &redis::Client,
     symbols: &HashSet<String>,
 ) -> anyhow::Result<()> {
-    let mut conn = redis_client.get_async_connection().await?;
+    let mut conn = redis_client.get_multiplexed_async_connection().await?;
 
     for symbol in symbols {
         let patterns = [
@@ -166,7 +167,7 @@ async fn invalidate_caches(
                     .arg("MATCH")
                     .arg(pattern)
                     .arg("COUNT")
-                    .arg(100)
+                    .arg(constants::REDIS_SCAN_BATCH_SIZE)
                     .query_async(&mut conn)
                     .await?;
 
@@ -180,9 +181,9 @@ async fn invalidate_caches(
 
             if !all_keys.is_empty() {
                 // UNLINK 非同步刪除，效能優於 DEL，不阻塞 Redis
-                redis::cmd("UNLINK")
+                let _: () = redis::cmd("UNLINK")
                     .arg(&all_keys)
-                    .query_async::<_, ()>(&mut conn)
+                    .query_async(&mut conn)
                     .await?;
 
                 tracing::debug!(
@@ -204,12 +205,13 @@ async fn invalidate_caches(
 mod tests {
     use super::*;
     use crate::data::models::DataSource;
+    use crate::models::Interval;
 
     fn make_raw_candle(symbol: &str) -> RawCandle {
         RawCandle {
             symbol: symbol.to_string(),
             timestamp_ms: 1704067200000,
-            interval: "1h".to_string(),
+            interval: Interval::OneHour,
             open: 150.0,
             high: 151.5,
             low: 149.5,
@@ -221,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_should_flush_when_batch_size_reached() {
-        let mut buffer = BulkInsertBuffer {
+        let buffer = BulkInsertBuffer {
             buffer: vec![make_raw_candle("2330"); 500],
             last_flush_at: Instant::now(),
             max_batch_size: 500,

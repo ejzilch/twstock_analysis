@@ -1,3 +1,4 @@
+use crate::constants;
 use crate::data::models::DataSource;
 use anyhow::Context;
 use chrono::Utc;
@@ -70,7 +71,10 @@ impl SymbolSyncer {
         let valid_stocks: Vec<&FinMindStockInfo> = response
             .data
             .iter()
-            .filter(|s| s.stock_type == "twse" || s.stock_type == "tpex")
+            .filter(|s| {
+                s.stock_type == constants::FINMIND_EXCHANGE_TWSE
+                    || s.stock_type == constants::FINMIND_EXCHANGE_TPEX
+            })
             .collect();
 
         if valid_stocks.is_empty() {

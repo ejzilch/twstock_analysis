@@ -1,4 +1,5 @@
 use crate::data::models::DataSource;
+use crate::models::Exchange;
 use serde::{Deserialize, Serialize};
 
 /// 系統動態管理的股票元數據
@@ -11,7 +12,7 @@ use serde::{Deserialize, Serialize};
 pub struct SymbolMeta {
     pub symbol: String,
     pub name: String,
-    pub exchange: String, // "TWSE" / "TPEX"
+    pub exchange: Exchange, // "TWSE" / "TPEX"
     pub data_source: DataSource,
     pub earliest_available_ms: i64,
     pub latest_available_ms: i64,

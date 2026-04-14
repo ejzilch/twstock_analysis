@@ -1,12 +1,11 @@
-use crate::data::fetch_rate_limiter::{FinMindRateLimiter, RateLimitError};
+use crate::constants;
+use crate::data::fetch_rate_limiter::FinMindRateLimiter;
 use crate::data::models::{DataSource, FetchParams, RawCandle};
+use crate::models::Interval;
 use anyhow::Context;
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use reqwest::Client;
 use std::time::Duration;
-
-// FinMind API timeout，對應 ARCH_DESIGN.md 定義的 15s
-const FINMIND_TIMEOUT_SECS: u64 = 15;
 
 /// 外部 K 線資料抓取器
 ///
@@ -24,7 +23,7 @@ impl DataFetcher {
     /// reqwest Client 設定 15s timeout，對應 FinMind API 的 timeout 規範。
     pub fn new(limiter: FinMindRateLimiter) -> Self {
         let client = Client::builder()
-            .timeout(Duration::from_secs(FINMIND_TIMEOUT_SECS))
+            .timeout(Duration::from_secs(constants::TIMEOUT_FINMIND_SECS))
             .build()
             .expect("Failed to build reqwest Client");
 
@@ -103,7 +102,7 @@ impl DataFetcher {
         raw_data
             .data
             .into_iter()
-            .map(|item| finmind_item_to_raw_candle(item, &params.symbol))
+            .map(|item| finmind_item_to_raw_candle(item, &params.symbol, params.interval))
             .collect()
     }
 
@@ -128,14 +127,14 @@ fn ms_to_date_string(ms: i64) -> anyhow::Result<String> {
         .timestamp_millis_opt(ms)
         .single()
         .context("Invalid timestamp_ms value")?;
-    Ok(datetime.format("%Y-%m-%d").to_string())
+    Ok(datetime.format(constants::FINMIND_DATE_FORMAT).to_string())
 }
 
 /// FinMind 日期字串轉換為毫秒時間戳（13 位 UTC）
 ///
 /// FinMind 回傳格式為 "YYYY-MM-DD"，轉換為當日 00:00:00 UTC 毫秒。
 fn date_string_to_ms(date_str: &str) -> anyhow::Result<i64> {
-    let naive_date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+    let naive_date = NaiveDate::parse_from_str(date_str, constants::FINMIND_DATE_FORMAT)
         .with_context(|| format!("Failed to parse date string: {date_str}"))?;
 
     let datetime = naive_date
@@ -149,7 +148,11 @@ fn date_string_to_ms(date_str: &str) -> anyhow::Result<i64> {
 ///
 /// 依 COLLAB_FRAMEWORK.md E1 規範，外部 API 回傳的浮點數
 /// 必須通過 is_finite() 檢查，拒絕 NaN 與 Inf。
-fn finmind_item_to_raw_candle(item: FinMindItem, symbol: &str) -> anyhow::Result<RawCandle> {
+fn finmind_item_to_raw_candle(
+    item: FinMindItem,
+    symbol: &str,
+    interval: Interval,
+) -> anyhow::Result<RawCandle> {
     // 驗證所有浮點數值，拒絕 NaN 與 Inf
     for (field_name, value) in [
         ("open", item.open),
@@ -170,6 +173,7 @@ fn finmind_item_to_raw_candle(item: FinMindItem, symbol: &str) -> anyhow::Result
     Ok(RawCandle {
         symbol: symbol.to_string(),
         timestamp_ms,
+        interval,
         open: item.open,
         high: item.max,
         low: item.min,
@@ -236,7 +240,7 @@ mod tests {
             close: 150.0,
             trading_volume: 1_000_000,
         };
-        let result = finmind_item_to_raw_candle(item, "2330");
+        let result = finmind_item_to_raw_candle(item, "2330", Interval::OneHour);
         assert!(result.is_err());
     }
 
@@ -250,7 +254,7 @@ mod tests {
             close: 150.0,
             trading_volume: 1_000_000,
         };
-        let result = finmind_item_to_raw_candle(item, "2330");
+        let result = finmind_item_to_raw_candle(item, "2330", Interval::OneHour);
         assert!(result.is_err());
     }
 
@@ -264,7 +268,7 @@ mod tests {
             close: 151.0,
             trading_volume: 1_000_000,
         };
-        let result = finmind_item_to_raw_candle(item, "2330").unwrap();
+        let result = finmind_item_to_raw_candle(item, "2330", Interval::OneHour).unwrap();
         assert_eq!(result.symbol, "2330");
         assert_eq!(result.timestamp_ms, 1704067200000);
         assert_eq!(result.open, 150.0);

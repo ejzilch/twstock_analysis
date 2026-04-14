@@ -1,3 +1,4 @@
+
 // ==========================================
 // AI Bridge API Interfaces
 // Auto-generated from OpenAPI Spec v2.2.0
@@ -106,7 +107,7 @@ export interface ComputeIndicatorsResponse {
 export interface Signal {
     id: string;
     timestamp_ms: number;
-    signal_type: 'BUY' | 'SELL' | 'HOLD';
+    signal_type: 'BUY' | 'SELL';
     confidence: number;
     entry_price: number;
     target_price: number;

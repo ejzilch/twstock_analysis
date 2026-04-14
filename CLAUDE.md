@@ -74,6 +74,12 @@ src/main.rs              Graceful Shutdown
 - 所有 `pub` 函數必須有 `///` doc comment
 - 金融數值用 `checked_add` / `checked_mul`，溢位回傳 `COMPUTATION_OVERFLOW`
 - candles 超過 2000 根 → 回傳 `400 QUERY_RANGE_TOO_LARGE`，禁止截斷
+- 有限合法值欄位使用 enum，不用 String
+  - 跨層共用（Interval, Exchange, SignalType）-> src/models/enums.rs
+  - API 層專用（HealthStatus, SignalSource, FetchSource）-> src/api/models/enums.rs
+- 錯誤碼字串引用 src/constants.rs 常數，不硬寫
+- 禁止魔法數字，具業務語義的數值一律引用 src/constants.rs
+- 判斷原則：數字需要 comment 才能理解就是魔法數字
 
 ### BridgeError（Rust ↔ Python）
 - 每個 variant 必須對應 `tracing::error!` 或 `tracing::warn!`，禁止靜默吞錯
@@ -143,6 +149,10 @@ src/main.rs              Graceful Shutdown
 - [ ] BridgeError 各 variant 有 tracing log
 - [ ] 序列化格式依 candle_count 選擇正確
 - [ ] 無 breaking changes，或已通知並附遷移計畫
+- [ ] API 錯誤碼字串引用 src/constants.rs
+- [ ] 有限合法值欄位已使用 enum，無裸字串
+- [ ] 新增 enum 已放在正確的層（models/ 或 api/models/）
+- [ ] 無魔法數字，業務數值已引用 constants.rs
 
 ---
 

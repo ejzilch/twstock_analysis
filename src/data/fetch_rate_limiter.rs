@@ -1,6 +1,7 @@
-use std::sync::Arc;
+use crate::constants;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::Mutex;
 
 // ── 公開型別 ────────────────────────────────────────────────────────────────
@@ -32,8 +33,8 @@ impl RateLimitConfig {
     pub fn free() -> Self {
         Self {
             tier: ApiTier::Free,
-            max_requests_per_minute: 10,
-            max_requests_per_day: 1_000,
+            max_requests_per_minute: constants::FINMIND_FREE_MAX_REQUESTS_PER_MINUTE,
+            max_requests_per_day: constants::FINMIND_FREE_MAX_REQUESTS_PER_DAY,
         }
     }
 
@@ -41,8 +42,8 @@ impl RateLimitConfig {
     pub fn paid() -> Self {
         Self {
             tier: ApiTier::Paid,
-            max_requests_per_minute: 100,
-            max_requests_per_day: 100_000,
+            max_requests_per_minute: constants::FINMIND_PAID_MAX_REQUESTS_PER_MINUTE,
+            max_requests_per_day: constants::FINMIND_PAID_MAX_REQUESTS_PER_DAY,
         }
     }
 }
@@ -146,7 +147,7 @@ impl FinMindRateLimiter {
     /// 若距上次分鐘視窗開始已超過 60 秒，重置分鐘計數器
     async fn reset_minute_window_if_elapsed(&self) {
         let mut state = self.minute_window_state.lock().await;
-        if state.window_start.elapsed() >= Duration::from_secs(60) {
+        if state.window_start.elapsed() >= constants::limits::MINUTE_WINDOW_DURATION {
             self.minute_request_count.store(0, Ordering::Relaxed);
             state.window_start = Instant::now();
         }
@@ -155,7 +156,7 @@ impl FinMindRateLimiter {
     /// 若距上次日視窗開始已超過 24 小時，重置每日計數器
     async fn reset_day_window_if_elapsed(&self) {
         let mut state = self.day_window_state.lock().await;
-        if state.window_start.elapsed() >= Duration::from_secs(86_400) {
+        if state.window_start.elapsed() >= constants::limits::DAY_WINDOW_DURATION {
             self.daily_request_count.store(0, Ordering::Relaxed);
             state.window_start = Instant::now();
         }

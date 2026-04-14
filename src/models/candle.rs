@@ -1,3 +1,4 @@
+use crate::models::Interval;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -9,7 +10,7 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Candle {
     pub symbol: String,
-    pub interval: String, // "1m" / "5m" / "15m" / "1h" / "4h" / "1d"
+    pub interval: Interval, // "1m" / "5m" / "15m" / "1h" / "4h" / "1d"
     pub timestamp_ms: i64,
     pub open: f64,
     pub high: f64,
