@@ -20,7 +20,7 @@ pub async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse::new(
-                    "INTERNAL_ERROR",
+                    StatusCode::INTERNAL_SERVER_ERROR.as_str(),
                     "Server configuration error",
                 )),
             )
@@ -37,7 +37,7 @@ pub async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -
             (
                 StatusCode::UNAUTHORIZED,
                 Json(ErrorResponse::new(
-                    "UNAUTHORIZED",
+                    StatusCode::UNAUTHORIZED.as_str(),
                     "Missing or invalid X-API-KEY header.",
                 )),
             )
@@ -48,7 +48,7 @@ pub async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -
             (
                 StatusCode::UNAUTHORIZED,
                 Json(ErrorResponse::new(
-                    "UNAUTHORIZED",
+                    StatusCode::UNAUTHORIZED.as_str(),
                     "Missing or invalid X-API-KEY header.",
                 )),
             )
