@@ -1,7 +1,6 @@
 use crate::api::models::ErrorResponse;
 use crate::constants;
 use axum::{
-    body::Body,
     extract::{ConnectInfo, Request},
     http::StatusCode,
     middleware::Next,
@@ -18,7 +17,7 @@ use tokio::sync::Mutex;
 
 /// 單一 IP 的請求計數狀態
 #[derive(Debug)]
-struct IpRateState {
+pub struct IpRateState {
     count: u32,
     window_start: Instant,
 }

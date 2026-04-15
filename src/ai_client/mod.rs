@@ -5,5 +5,4 @@
 pub mod client;
 pub mod serialization;
 
-pub use client::{AiServiceClient, PredictRequest, PredictResponse};
-pub use serialization::SerializationFormat;
+pub use client::AiServiceClient;

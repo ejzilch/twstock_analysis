@@ -1,6 +1,7 @@
+use crate::api::models::enums::ObservabilityStatus;
 use crate::api::models::{FetchSource, HealthStatus, ReliabilityLevel, SignalSource};
 use crate::models::{IndicatorValue, Interval, SignalType};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // ── K 線 Response ─────────────────────────────────────────────────────────────
@@ -8,7 +9,7 @@ use std::collections::HashMap;
 /// GET /api/v1/candles/{symbol} 的單筆 K 線資料
 ///
 /// 從 Candle domain model 轉換而來，不含 symbol 與 interval（由外層 response 提供）。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CandleResponse {
     pub timestamp_ms: i64,
     pub open: f64,
@@ -139,6 +140,7 @@ pub struct ObservabilityMetrics {
     pub api_success_rate_pct: f64,
     pub api_success_rate_status: String,
     pub bridge_errors_last_hour: i64,
+    pub bridge_error_status: ObservabilityStatus,
 }
 
 /// GET /health/integrity 的完整 response

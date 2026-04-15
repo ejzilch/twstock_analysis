@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT symbol, name, exchange, data_source,\n                       COALESCE(earliest_ms, 0) AS \"earliest_ms!\",\n                       COALESCE(latest_ms, 0)   AS \"latest_ms!\",\n                       is_active, updated_at_ms\n                FROM symbols\n                WHERE is_active = $1\n                ORDER BY symbol ASC\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "symbol",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "exchange",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "data_source",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "earliest_ms!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "latest_ms!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "is_active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at_ms",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "d3a1257c73c24a753d5a7f8f813e3d31722bca3b2250422fb182a733365e3c4a"
+}

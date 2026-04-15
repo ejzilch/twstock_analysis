@@ -15,6 +15,26 @@ pub enum Exchange {
     Tpex,
 }
 
+impl Exchange {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Exchange::Twse => "TWSE",
+            Exchange::Tpex => "TPEX",
+        }
+    }
+}
+
+impl From<String> for Exchange {
+    fn from(s: String) -> Self {
+        // 使用 s.parse() 會自動去呼叫你實作的 FromStr
+        s.parse().unwrap_or_else(|_| {
+            // 遵循系統設計規範：記錄異常並給予安全回退
+            tracing::warn!("資料庫發現非法交易所字串: {}, 預設回退至 Twse", s);
+            Exchange::Twse
+        })
+    }
+}
+
 impl fmt::Display for Exchange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

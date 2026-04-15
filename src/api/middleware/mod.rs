@@ -7,6 +7,4 @@ pub mod auth;
 pub mod error;
 pub mod rate_limit;
 
-pub use auth::auth_middleware;
 pub use error::ApiError;
-pub use rate_limit::{new_rate_limiter_state, rate_limit_middleware, RateLimiterState};
