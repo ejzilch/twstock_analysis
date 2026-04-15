@@ -5,9 +5,6 @@ use chrono::Utc;
 use sqlx::{PgPool, Postgres, QueryBuilder};
 use std::time::Duration;
 
-// FinMind TaiwanStockInfo API timeout
-const FINMIND_TIMEOUT_SECS: u64 = 15;
-
 // ── 內部反序列化結構（非對外公開）────────────────────────────────────────────
 
 #[derive(serde::Deserialize, Debug)]
@@ -40,7 +37,7 @@ impl SymbolSyncer {
     /// 建立新的 SymbolSyncer，reqwest Client 設定 15s timeout
     pub fn new(pool: PgPool) -> Self {
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(FINMIND_TIMEOUT_SECS))
+            .timeout(Duration::from_secs(constants::TIMEOUT_FINMIND_SECS))
             .build()
             .expect("Failed to build reqwest Client for SymbolSyncer");
 
