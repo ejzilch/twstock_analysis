@@ -1,0 +1,55 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT timestamp_ms, open, high, low, close, volume\n        FROM candles\n        WHERE symbol = $1\n          AND interval = $2\n          AND timestamp_ms BETWEEN $3 AND $4\n        ORDER BY timestamp_ms ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "timestamp_ms",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "open",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 2,
+        "name": "high",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 3,
+        "name": "low",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 4,
+        "name": "close",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "volume",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d98e8259a13a1531c79f5d7deeb8571c4c94c50b8c4c5d106c36c42bc1f86d54"
+}
