@@ -1,0 +1,54 @@
+.rdp {
+    --rdp-cell-size: 36px;
+    --rdp-accent-color: #3b82f6;
+    --rdp-background-color: rgba(59, 130, 246, 0.15);
+
+    margin: 0;
+    color: #e2e8f0;
+}
+
+.rdp-months {
+    gap: 1rem;
+}
+
+.rdp-month {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.rdp-caption {
+    display: flex;
+    justify-content: space-between;
+    color: #94a3b8;
+    font-size: 13px;
+}
+
+.rdp-day {
+    border-radius: 8px;
+    transition: all 0.15s ease;
+}
+
+.rdp-day:hover {
+    background: #1e293b;
+}
+
+.rdp-day_selected {
+    background: #3b82f6 !important;
+    color: white;
+}
+
+.rdp-day_range_middle {
+    background: rgba(59, 130, 246, 0.15);
+}
+
+.rdp-day_range_start,
+.rdp-day_range_end {
+    background: #3b82f6;
+    color: white;
+}
+
+.rdp-day_today {
+    border: 1px solid #3b82f6;
+}
