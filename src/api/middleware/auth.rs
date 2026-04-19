@@ -1,7 +1,7 @@
 use crate::api::models::ErrorResponse;
 use axum::{
     extract::Request,
-    http::{HeaderMap, StatusCode},
+    http::{Method, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
@@ -12,7 +12,11 @@ use axum::{
 /// 從 request header 取得 X-API-KEY，與環境變數 API_KEY 比對。
 /// 缺少或不符時回傳 401 UNAUTHORIZED，不繼續處理請求。
 /// /health 與 /health/integrity 端點不需要認證（在 router 層排除）。
-pub async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -> Response {
+pub async fn auth_middleware(request: Request, next: Next) -> Response {
+    if request.method() == Method::OPTIONS {
+        return next.run(request).await;
+    }
+
     let expected_key = match std::env::var("API_KEY") {
         Ok(key) if !key.is_empty() => key,
         _ => {
@@ -28,6 +32,7 @@ pub async fn auth_middleware(headers: HeaderMap, request: Request, next: Next) -
         }
     };
 
+    let headers = request.headers();
     let provided_key = headers.get("X-API-KEY").and_then(|v| v.to_str().ok());
 
     match provided_key {

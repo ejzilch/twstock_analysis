@@ -19,10 +19,14 @@ use crate::api::{
     },
 };
 use axum::{
+    http::{HeaderValue, Method},
     routing::{get, post},
     Router,
 };
+use dotenvy::dotenv;
+use std::env;
 use std::sync::Arc;
+use tower_http::cors::{Any, CorsLayer};
 
 /// 組裝完整的 Axum Router
 ///
@@ -36,6 +40,16 @@ pub fn build_router(app_state: Arc<AppState>, rate_limiter: RateLimiterState) ->
         .route("/health/integrity", get(integrity_handler))
         .with_state(app_state.clone());
 
+    dotenv().ok();
+
+    let frontend_url =
+        env::var("FRONTEND_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+
+    let cors = CorsLayer::new()
+        .allow_origin(frontend_url.parse::<HeaderValue>().unwrap())
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers(Any);
+
     // API 路由，掛在 /api/v1，需認證與 rate limit
     let api_router = Router::new()
         .route("/symbols", get(symbols_handler))
@@ -44,6 +58,7 @@ pub fn build_router(app_state: Arc<AppState>, rate_limiter: RateLimiterState) ->
         .route("/signals/:symbol", get(signals_handler))
         .route("/predict", post(predict_handler))
         .route("/backtest", post(backtest_handler))
+        .layer(cors)
         .layer(axum::middleware::from_fn(auth_middleware))
         .layer(axum::middleware::from_fn_with_state(
             rate_limiter,
