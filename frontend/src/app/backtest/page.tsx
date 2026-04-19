@@ -2,8 +2,8 @@
 import { useRouter } from 'next/navigation'
 import { useBacktest } from '@/hooks'
 import { StrategyForm, BacktestResult } from '@/components/backtest'
-import { ErrorToast, Card } from '@/components/ui'
-import { LoadingSpinner } from '@/components/ui'
+import { BacktestChart } from '@/components/backtest/Backtestchart'
+import { ErrorToast, Card, LoadingSpinner } from '@/components/ui'
 
 export default function BacktestPage() {
     const router = useRouter()
@@ -44,7 +44,14 @@ export default function BacktestPage() {
 
                     {/* 回測結果 */}
                     {backtest.data && !backtest.isPending && (
-                        <BacktestResult result={backtest.data} />
+                        <>
+                            <BacktestResult result={backtest.data} />
+                            <BacktestChart
+                                symbol={backtest.data.symbol}
+                                from_ms={backtest.data.from_ms}
+                                to_ms={backtest.data.to_ms}
+                            />
+                        </>
                     )}
 
                     {/* 錯誤處理 */}

@@ -7,6 +7,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient, buildQueryString } from '@/lib/api-client'
 import { isMarketOpen, generateRequestId } from '@/lib/utils'
 import { useAppStore } from '@/store/useAppStore'
+import { useFocusPolling } from './useFocusPolling'
 import type {
     SymbolsResponse,
     CandlesResponse,
@@ -38,10 +39,7 @@ interface UseCandlesParams {
 }
 
 export function useCandles(params: UseCandlesParams) {
-    const isEco = useAppStore((s) => s.isEcoModeEnabled)
-    const refetchInterval = isMarketOpen()
-        ? 30_000
-        : isEco ? 5 * 60_000 : 30_000
+    const refetchInterval = useFocusPolling()
 
     const qs = buildQueryString({
         from_ms: params.from_ms,
@@ -57,6 +55,7 @@ export function useCandles(params: UseCandlesParams) {
         staleTime: 25_000,
         gcTime: 5 * 60_000,
         refetchInterval,
+        refetchIntervalInBackground: false,
         enabled: !!params.symbol && !!params.from_ms && !!params.to_ms,
     })
 }
@@ -70,10 +69,7 @@ interface UseSignalsParams {
 }
 
 export function useSignals(params: UseSignalsParams) {
-    const isEco = useAppStore((s) => s.isEcoModeEnabled)
-    const refetchInterval = isMarketOpen()
-        ? 30_000
-        : isEco ? 5 * 60_000 : 30_000
+    const refetchInterval = useFocusPolling()
 
     const qs = buildQueryString({ from_ms: params.from_ms, to_ms: params.to_ms })
 
@@ -83,6 +79,7 @@ export function useSignals(params: UseSignalsParams) {
         staleTime: 25_000,
         gcTime: 5 * 60_000,
         refetchInterval,
+        refetchIntervalInBackground: false,
         enabled: !!params.symbol,
     })
 }
