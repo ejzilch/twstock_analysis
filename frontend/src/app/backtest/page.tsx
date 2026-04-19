@@ -1,9 +1,9 @@
 'use client'
 import { useRouter } from 'next/navigation'
-import { useBacktest } from '@/hooks'
-import { StrategyForm, BacktestResult } from '@/components/backtest'
-import { BacktestChart } from '@/components/backtest/Backtestchart'
-import { ErrorToast, Card, LoadingSpinner } from '@/components/ui'
+import { useBacktest } from '@/src/hooks'
+import { StrategyForm, BacktestResult } from '@/src/components/backtest'
+import { BacktestChart } from '@/src/components/backtest/BacktestChart'
+import { ErrorToast, Card, LoadingSpinner } from '@/src/components/ui'
 
 export default function BacktestPage() {
     const router = useRouter()

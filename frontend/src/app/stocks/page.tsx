@@ -1,8 +1,8 @@
 'use client'
 import { useRouter } from 'next/navigation'
-import { useSymbols } from '@/hooks'
-import { StockTable } from '@/components/stocks'
-import { LoadingSpinner, ErrorToast } from '@/components/ui'
+import { useSymbols } from '@/src/hooks'
+import { StockTable } from '@/src/components/stocks'
+import { LoadingSpinner, ErrorToast } from '@/src/components/ui'
 
 export default function StocksPage() {
     const router = useRouter()

@@ -2,17 +2,17 @@
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { clsx } from 'clsx'
-import { useCandles, useSignals } from '@/hooks'
-import { useAppStore } from '@/store/useAppStore'
-import { CandleChart, IndicatorPane } from '@/components/charts/CandleChart'
+import { useCandles, useSignals } from '@/src/hooks'
+import { useAppStore } from '@/src/store/useAppStore'
+import { CandleChart, IndicatorPane } from '@/src/components/charts'
 import {
     SymbolSelector,
     IntervalSelector,
     SignalList,
     PredictionPanel,
-} from '@/components/dashboard'
-import { LoadingSpinner, ErrorToast, Card } from '@/components/ui'
-import { ApiErrorException } from '@/lib/api-client'
+} from '@/src/components/dashboard'
+import { LoadingSpinner, ErrorToast, Card } from '@/src/components/ui'
+import { ApiErrorException } from '@/src/lib/api-client'
 
 // ── Time range options ────────────────────────────────────────────────────────
 
