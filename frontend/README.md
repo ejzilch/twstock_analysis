@@ -55,5 +55,5 @@ store/ → UI 狀態，禁止存伺服器資料
 
 | 變數 | 說明 | 預設值 |
 |------|------|--------|
-| NEXT_PUBLIC_API_BASE_URL | Rust API Gateway 地址 | http://localhost:8080 |
+| NEXT_PUBLIC_API_BASE_URL | Rust API Gateway 地址 | http://localhost:8089 |
 | NEXT_PUBLIC_API_KEY | 開發用 API Key | dev-api-key |
