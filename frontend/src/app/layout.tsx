@@ -1,9 +1,8 @@
 import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
-import { AppQueryClientProvider } from '@/providers/QueryClientProvider'
-import { SidebarNav } from '@/components/ui/SidebarNav'
-import { ColorModeToggle } from '@/components/mode/ColorModeToggle'
-
+import { AppQueryClientProvider } from '@/src/providers/QueryClientProvider'
+import { SidebarNav } from '@/src/components/ui/SidebarNav'
+import { ColorModeToggle } from '@/src/components/features/theme'
 import './globals.css'
 
 export const metadata: Metadata = {

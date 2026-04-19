@@ -39,7 +39,7 @@
         "src",
         "tailwind.config.js",
         "globals.css",
-        "types"
+        "src/types"
     ],
     "exclude": [
         "node_modules"

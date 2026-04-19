@@ -26,76 +26,108 @@
 
 ```
 frontend/
-├── public/                         # 靜態資源（圖標、字體）
+├── public/                            # 靜態資源（圖標、字體）
 │
 ├── src/
-│   ├── app/                        # Next.js App Router 路由層
-│   │   ├── layout.tsx              # 全域佈局（側邊欄、主題、QueryClientProvider）
-│   │   ├── page.tsx                # 根路徑，重定向至 /dashboard
+│   ├── app/                           # Next.js App Router 路由層
 │   │   ├── dashboard/
-│   │   │   └── page.tsx            # Dashboard 頁（K 線 + 信號）
+│   │   │   └── page.tsx               # Dashboard 頁（K 線 + 信號）
+│   │   ├── settings/
+│   │   │   └── page.tsx               # 設定頁
 │   │   ├── stocks/
-│   │   │   └── page.tsx            # 股票總覽頁
+│   │   │   └── page.tsx               # 股票總覽頁
 │   │   ├── backtest/
-│   │   │   └── page.tsx            # 回測頁
-│   │   └── settings/
-│   │       └── page.tsx            # 設定頁
+│   │   │   └── page.tsx               # 回測頁
+│   │   ├── error.tsx
+│   │   ├── globals.css
+│   │   ├── layout.tsx                 # 全域佈局（側邊欄、主題、QueryClientProvider）
+│   │   ├── loading.tsx
+│   │   └── page.tsx                   # 根路徑，重定向至 /dashboard
 │   │
-│   ├── components/                 # 元件庫
-│   │   ├── ui/                     # 原子組件，無業務邏輯
-│   │   │   ├── Button.tsx
-│   │   │   ├── Card.tsx
-│   │   │   ├── Input.tsx
-│   │   │   ├── Toast.tsx           # error_code → UI 提示的統一入口
-│   │   │   ├── Badge.tsx           # reliability badge
-│   │   │   └── LoadingSpinner.tsx
+│   ├── components/                    # 元件庫
+│   │   ├── backtest/                  # 回測業務組件
+│   │   │   ├── BacktestChart.tsx      # 回測 K 線 + 信號疊加圖
+│   │   │   ├── BacktestResult.tsx     # 結果卡片（win rate、sharpe 等）
+│   │   │   ├── StrategyForm.tsx       # 策略參數設定表單
+│   │   │   ├── MetricCard.tsx
+│   │   │   └── index.ts               # export 上方元件
 │   │   │
-│   │   ├── charts/                 # 圖表邏輯，只依賴 TradingView + props
-│   │   │   ├── CandleChart.tsx     # 主 K 線圖，接受 candles + signals props
-│   │   │   ├── IndicatorPane.tsx   # RSI / MACD 子圖
-│   │   │   └── chartUtils.ts       # toTradingViewCandle()，格式轉換純函數
+│   │   ├── charts/                    # 圖表邏輯，只依賴 TradingView + props
+│   │   │   ├── CandleChart.tsx        # 主 K 線圖，接受 candles + signals props
+│   │   │   ├── IndicatorPane.tsx      # RSI / MACD 子圖
+│   │   │   └── index.ts
 │   │   │
-│   │   ├── dashboard/              # Dashboard 業務組件
-│   │   │   ├── SymbolSelector.tsx  # 股票選擇器（從 /api/v1/symbols 載入）
+│   │   ├── dashboard/                 # Dashboard 業務組件
 │   │   │   ├── IntervalSelector.tsx
-│   │   │   ├── SignalList.tsx      # 信號列表，含 reliability badge
-│   │   │   └── PredictionPanel.tsx # AI 信心度面板
+│   │   │   ├── PredictionPanel.tsx    # AI 信心度面板
+│   │   │   ├── SignalList.tsx         # 信號列表，含 reliability badge
+│   │   │   ├── SymbolSelector.tsx     # 股票選擇器（從 /api/v1/symbols 載入）
+│   │   │   └── index.ts
 │   │   │
-│   │   ├── stocks/                 # 股票總覽業務組件
-│   │   │   ├── StockTable.tsx      # 股票清單表格，含搜尋篩選
-│   │   │   └── StockRow.tsx        # 單行，含日線指標
+│   │   ├── features/                  # features
+│   │   │   ├── backtest/
+│   │   │   │   ├── backtestDayPicker.css
+│   │   │   │   └── BacktestDayPicker.tsx
+│   │   │   │
+│   │   │   └── theme/
+│   │   │       └── ColorModeToggle.tsx
 │   │   │
-│   │   ├── backtest/               # 回測業務組件
-│   │   │   ├── StrategyForm.tsx    # 策略參數設定表單
-│   │   │   ├── BacktestResult.tsx  # 結果卡片（win rate、sharpe 等）
-│   │   │   └── BacktestChart.tsx   # 回測 K 線 + 信號疊加圖
+│   │   ├── settings/                  # 設定頁業務組件
+│   │   │   ├── ApiKeyForm.tsx
+│   │   │   ├── PreferenceForm.tsx
+│   │   │   └── index.ts
 │   │   │
-│   │   └── settings/              # 設定頁業務組件
-│   │       ├── ApiKeyForm.tsx
-│   │       └── PreferenceForm.tsx
+│   │   ├── stocks/                    # 股票總覽業務組件
+│   │   │   ├── StockTable.tsx         # 股票清單表格，含搜尋篩選
+│   │   │   ├── StockRow.tsx           # 單行，含日線指標
+│   │   │   └── index.ts
+│   │   │
+│   │   └── ui/                        # 原子組件，無業務邏輯
+│   │       ├── Button.tsx
+│   │       ├── Card.tsx
+│   │       ├── ErrorToast.tsx         # error_code → UI 提示的統一入口
+│   │       ├── Input.tsx
+│   │       ├── LoadingSpinner.tsx
+│   │       ├── ReliabilityBadge.tsx   # reliability badge
+│   │       ├── Select.tsx
+│   │       └── SidebarNav.tsx
 │   │
-│   ├── hooks/                      # 自訂 Hooks，封裝 React Query 呼叫
-│   │   ├── useSymbols.ts           # GET /api/v1/symbols
-│   │   ├── useCandles.ts           # GET /api/v1/candles/{symbol}（含分頁）
-│   │   ├── useSignals.ts           # GET /api/v1/signals/{symbol}
-│   │   └── useBacktest.ts          # POST /api/v1/backtest（mutation）
+│   ├── constants/
+│   │   └── chartColors.js
 │   │
-│   ├── lib/                        # 核心工具，純函數或單例，無 React 依賴
-│   │   ├── api-client.ts           # fetch 封裝，統一加 X-API-KEY header、處理 error_code
-│   │   ├── error-handler.ts        # error_code → Toast / redirect 邏輯
-│   │   └── utils.ts                # 日期格式化、數值格式化等通用工具
+│   ├── hooks/                         # 自訂 Hooks，封裝 React Query 呼叫
+│   │   ├── useBacktest.ts             # POST /api/v1/backtest（mutation）
+│   │   ├── useCandles.ts              # GET /api/v1/candles/{symbol}（含分頁）
+│   │   ├── useFocusPolling.ts
+│   │   ├── useSignals.ts              # GET /api/v1/signals/{symbol}
+│   │   ├── useSignalTheme.tsx
+│   │   ├── useSymbols.ts              # GET /api/v1/symbols
+│   │   └── index.ts
 │   │
-│   ├── store/                      # Zustand UI 狀態（非伺服器資料）
-│   │   └── useAppStore.ts          # 統一單一 store
+│   ├── lib/                           # 核心工具，純函數或單例，無 React 依賴
+│   │   ├── api-client.ts              # fetch 封裝，統一加 X-API-KEY header、處理 error_code
+│   │   ├── error-handler.ts           # error_code → Toast / redirect 邏輯
+│   │   └── utils.ts                   # 日期格式化、數值格式化等通用工具
 │   │
-│   ├── types/                      # TypeScript 型別
-│   │   ├── api.generated.ts        # 從 OpenAPI Spec 生成，禁止手動修改
-│   │   └── app.ts                  # 業務層衍生型別（Pick<>/Omit<> 組合）
+│   ├── providers/                     # React Provider 集中管理
+│   │   └── QueryClientProvider.tsx    # React Query 全域設定
 │   │
-│   └── providers/                  # React Provider 集中管理
-│       └── QueryClientProvider.tsx # React Query 全域設定
+│   ├── store/                         # Zustand UI 狀態（非伺服器資料）
+│   │   └── useAppStore.ts             # 統一單一 store
+│   │
+│   └── types/                         # TypeScript 型別
+│       ├── api.generated.ts           # 從 OpenAPI Spec 生成，禁止手動修改
+│       └── app.ts                     # 業務層衍生型別（Pick<>/Omit<> 組合）
 │
-└── tailwind.config.ts
+├── .env.local
+├── .env.local.example
+├── env.d.ts
+├── next.config.js
+├── package.json
+├── postcss.config.js
+├── README.md
+├── tailwind.config.ts
+└── tsconfig.json
 ```
 
 ### 層級邊界規則

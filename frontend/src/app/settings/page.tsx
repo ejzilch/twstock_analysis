@@ -1,5 +1,5 @@
 'use client'
-import { ApiKeyForm, PreferenceForm } from '@/components/settings'
+import { ApiKeyForm, PreferenceForm } from '@/src/components/settings'
 
 export default function SettingsPage() {
     return (
