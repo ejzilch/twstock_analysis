@@ -133,13 +133,13 @@ pub struct HealthComponents {
 /// GET /health/integrity 的 Observability 指標
 #[derive(Debug, Clone, Serialize)]
 pub struct ObservabilityMetrics {
-    pub data_latency_seconds: i64,
+    pub data_latency_seconds: u64,
     pub data_latency_status: String,
-    pub ai_inference_p99_ms: i64,
+    pub ai_inference_p99_ms: u64,
     pub ai_inference_status: String,
     pub api_success_rate_pct: f64,
     pub api_success_rate_status: String,
-    pub bridge_errors_last_hour: i64,
+    pub bridge_errors_last_hour: u32,
     pub bridge_error_status: ObservabilityStatus,
 }
 
@@ -158,7 +158,6 @@ pub struct IntegrityChecks {
     pub cache_db_consistency: CacheDbConsistency,
     pub indicator_dag_order: DagOrderCheck,
     pub python_ai_service: AiServiceCheck,
-    pub data_source: DataSourceCheck,
 }
 
 #[derive(Debug, Clone, Serialize)]

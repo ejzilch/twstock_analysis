@@ -1,9 +1,9 @@
-use crate::api::handlers::health::AppState;
 use crate::api::middleware::ApiError;
 use crate::api::models::enums::FetchSource;
 use crate::api::models::request::CandlesQueryParams;
 use crate::api::models::response::{CandleResponse, CandlesApiResponse};
-use crate::constants::CANDLES_MAX_QUERY_LIMIT;
+use crate::app_state::AppState;
+use crate::constants::CANDLES_MAX_PER_REQUEST;
 use crate::models::Interval;
 use axum::{
     extract::{Path, Query, State},
@@ -31,10 +31,10 @@ pub async fn candles_handler(
     let total_available =
         count_candles(&state, &symbol, interval, params.from_ms, params.to_ms).await?;
 
-    if total_available > CANDLES_MAX_QUERY_LIMIT {
+    if total_available > CANDLES_MAX_PER_REQUEST {
         return Err(ApiError::QueryRangeTooLarge {
             requested: total_available,
-            max: CANDLES_MAX_QUERY_LIMIT,
+            max: CANDLES_MAX_PER_REQUEST,
         });
     }
 
@@ -62,14 +62,20 @@ pub async fn candles_handler(
 // ── 私有查詢函數 ──────────────────────────────────────────────────────────────
 
 async fn validate_symbol_exists(state: &AppState, symbol: &str) -> Result<(), ApiError> {
-    let exists: Option<bool> =
-        sqlx::query_scalar!("SELECT is_active FROM symbols WHERE symbol = $1", symbol)
-            .fetch_optional(&state.db_client.pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, symbol = %symbol, "DB error checking symbol");
-                ApiError::DataSourceInterrupted
-            })?;
+    let exists: Option<bool> = sqlx::query_scalar!(
+        r#"
+        SELECT is_active as "is_active!"
+        FROM symbols
+        WHERE symbol = $1
+        "#,
+        symbol
+    )
+    .fetch_optional(&state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, symbol = %symbol, "DB error checking symbol");
+        ApiError::DataSourceInterrupted
+    })?;
 
     match exists {
         Some(_) => Ok(()),
@@ -99,7 +105,7 @@ async fn count_candles(
         from_ms,
         to_ms
     )
-    .fetch_one(&state.db_client.pool)
+    .fetch_one(&state.db_pool)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to count candles");
@@ -118,22 +124,16 @@ async fn fetch_candles_with_cache(
 ) -> Result<(Vec<CandleResponse>, FetchSource, bool), ApiError> {
     // 嘗試 Redis 快取
     let cache_key = format!("indicators:{symbol}:{interval}");
-    if let Ok(mut conn) = state
-        .db_client
-        .redis_client
-        .get_multiplexed_async_connection()
-        .await
-    {
-        let cached: redis::RedisResult<Option<String>> = redis::cmd("GET")
-            .arg(&cache_key)
-            .query_async(&mut conn)
-            .await;
+    let mut conn = state.redis_client.clone();
+    let cached: redis::RedisResult<Option<String>> = redis::cmd("GET")
+        .arg(&cache_key)
+        .query_async(&mut conn)
+        .await;
 
-        if let Ok(Some(json_str)) = cached {
-            if let Ok(candles) = serde_json::from_str::<Vec<CandleResponse>>(&json_str) {
-                tracing::debug!(symbol = %symbol, "Cache hit for candles");
-                return Ok((candles, FetchSource::Cache, true));
-            }
+    if let Ok(Some(json_str)) = cached {
+        if let Ok(candles) = serde_json::from_str::<Vec<CandleResponse>>(&json_str) {
+            tracing::debug!(symbol = %symbol, "Cache hit for candles");
+            return Ok((candles, FetchSource::Cache, true));
         }
     }
 
@@ -173,7 +173,7 @@ async fn fetch_candles_from_db(
         from_ms,
         to_ms
     )
-    .fetch_all(&state.db_client.pool)
+    .fetch_all(&state.db_pool)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to fetch candles from DB");

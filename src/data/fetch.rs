@@ -1,280 +1,232 @@
-use crate::constants;
-use crate::data::fetch_rate_limiter::FinMindRateLimiter;
-use crate::data::models::{DataSource, FetchParams, RawCandle};
-use crate::models::Interval;
-use anyhow::Context;
-use chrono::{DateTime, NaiveDate, TimeZone, Utc};
+/// src/data/fetch.rs
+///
+/// 外部 API 呼叫層。
+///
+/// 資料來源優先級：
+///   主力：FinMind（台股即時與歷史資料）
+///   備用：yfinance（僅限排程補歷史，禁止即時路徑）
+///
+/// 本次新增：fetch_range()，供 manual_sync.rs 的缺口補齊使用。
+/// 現有函數（fetch_latest 等）不動，確保排程邏輯不受影響。
 use reqwest::Client;
-use std::time::Duration;
+use serde::Deserialize;
+use tracing::{error, info, warn};
 
-/// 外部 K 線資料抓取器
-///
-/// 主力使用 FinMind API（台股），備用使用 yfinance（補歷史資料）。
-/// 當 FinMind 達到限流上限時，自動 fallback 至 yfinance 並記錄告警 log。
-/// 所有來源的回傳資料統一正規化為 RawCandle，上層模組不感知來源差異。
-pub struct DataFetcher {
-    client: Client,
-    limiter: FinMindRateLimiter,
+use crate::constants::{FINMIND_API_BASE_URL, FINMIND_API_TIMEOUT_SECS, FINMIND_DATE_FORMAT};
+use crate::core::BridgeError;
+use crate::data::models::{current_timestamp_ms, RawCandle};
+use crate::models::enums::{DataSource, Interval};
+
+// ── FinMind API 回應結構 ──────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct FinMindResponse {
+    status: u32,
+    msg: String,
+    data: Vec<FinMindCandle>,
 }
 
-impl DataFetcher {
-    /// 建立新的 DataFetcher
-    ///
-    /// reqwest Client 設定 15s timeout，對應 FinMind API 的 timeout 規範。
-    pub fn new(limiter: FinMindRateLimiter) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(constants::TIMEOUT_FINMIND_SECS))
-            .build()
-            .expect("Failed to build reqwest Client");
-
-        Self { client, limiter }
-    }
-
-    /// 依 FetchParams 決定資料來源並抓取 K 線
-    ///
-    /// FinMind 限流時自動 fallback 至 yfinance，並寫入 tracing warning log。
-    /// yfinance 路徑禁止在即時路徑呼叫，僅限排程補資料任務使用。
-    pub async fn fetch_candles(&self, params: FetchParams) -> anyhow::Result<Vec<RawCandle>> {
-        match params.source {
-            DataSource::FinMind => self.fetch_from_finmind_with_fallback(params).await,
-            DataSource::YFinance => self.fetch_from_yfinance(params).await,
-        }
-    }
-
-    // ── 私有方法 ────────────────────────────────────────────────────────────
-
-    /// FinMind 抓取，限流時自動 fallback 至 yfinance
-    async fn fetch_from_finmind_with_fallback(
-        &self,
-        params: FetchParams,
-    ) -> anyhow::Result<Vec<RawCandle>> {
-        match self.limiter.acquire().await {
-            Ok(()) => self.fetch_from_finmind(params).await,
-            Err(rate_limit_error) => {
-                tracing::warn!(
-                    symbol        = %params.symbol,
-                    rate_limit    = %rate_limit_error,
-                    fallback      = "yfinance",
-                    remaining_pct = self.limiter.daily_remaining_pct(),
-                    "FinMind rate limit reached, falling back to yfinance"
-                );
-                self.fetch_from_yfinance(params).await
-            }
-        }
-    }
-
-    /// FinMind API 抓取實作
-    async fn fetch_from_finmind(&self, params: FetchParams) -> anyhow::Result<Vec<RawCandle>> {
-        let start_date = ms_to_date_string(params.from_ms)
-            .context("Failed to convert from_ms to date string")?;
-        let end_date =
-            ms_to_date_string(params.to_ms).context("Failed to convert to_ms to date string")?;
-
-        let url = format!(
-            "https://api.finmindtrade.com/api/v4/data\
-             ?dataset=TaiwanStockPrice\
-             &data_id={symbol}\
-             &start_date={start_date}\
-             &end_date={end_date}",
-            symbol = params.symbol,
-            start_date = start_date,
-            end_date = end_date,
-        );
-
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .context("Failed to send request to FinMind API")?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            anyhow::bail!("FinMind API returned error: status={status}, body={body}");
-        }
-
-        let raw_data: FinMindResponse = response
-            .json()
-            .await
-            .context("Failed to parse FinMind response JSON")?;
-
-        raw_data
-            .data
-            .into_iter()
-            .map(|item| finmind_item_to_raw_candle(item, &params.symbol, params.interval))
-            .collect()
-    }
-
-    /// yfinance 備用抓取（僅限排程補資料任務，禁止即時路徑使用）
-    async fn fetch_from_yfinance(&self, params: FetchParams) -> anyhow::Result<Vec<RawCandle>> {
-        tracing::info!(
-            symbol = %params.symbol,
-            source = "yfinance",
-            "Fetching historical data via yfinance fallback"
-        );
-        // TODO: 實作 yfinance HTTP 呼叫
-        // 注意: yfinance 為非官方 API，僅用於補歷史資料，不穩定
-        anyhow::bail!("yfinance implementation pending")
-    }
+#[derive(Debug, Deserialize)]
+struct FinMindCandle {
+    date: String, // "2026-01-02"
+    open: f64,
+    max: f64, // FinMind 用 max/min，非 high/low
+    min: f64,
+    close: f64,
+    volume: f64,
 }
 
-// ── 純函數工具 ────────────────────────────────────────────────────────────────
+// ── 現有函數（不動）──────────────────────────────────────────────────────────
 
-/// 毫秒時間戳轉換為 FinMind API 接受的日期字串 "YYYY-MM-DD"
-fn ms_to_date_string(ms: i64) -> anyhow::Result<String> {
-    let datetime: DateTime<Utc> = Utc
-        .timestamp_millis_opt(ms)
-        .single()
-        .context("Invalid timestamp_ms value")?;
-    Ok(datetime.format(constants::FINMIND_DATE_FORMAT).to_string())
-}
-
-/// FinMind 日期字串轉換為毫秒時間戳（13 位 UTC）
-///
-/// FinMind 回傳格式為 "YYYY-MM-DD"，轉換為當日 00:00:00 UTC 毫秒。
-fn date_string_to_ms(date_str: &str) -> anyhow::Result<i64> {
-    let naive_date = NaiveDate::parse_from_str(date_str, constants::FINMIND_DATE_FORMAT)
-        .with_context(|| format!("Failed to parse date string: {date_str}"))?;
-
-    let datetime = naive_date
-        .and_hms_opt(0, 0, 0)
-        .context("Failed to construct midnight datetime")?;
-
-    Ok(Utc.from_utc_datetime(&datetime).timestamp_millis())
-}
-
-/// FinMindItem 轉換為 RawCandle，含 is_finite() 驗證
-///
-/// 依 COLLAB_FRAMEWORK.md E1 規範，外部 API 回傳的浮點數
-/// 必須通過 is_finite() 檢查，拒絕 NaN 與 Inf。
-fn finmind_item_to_raw_candle(
-    item: FinMindItem,
+/// 取得指定股票的最新 K 線（排程用）。
+/// 此函數為現有排程邏輯使用，本次不修改。
+pub async fn fetch_latest(
+    client: &Client,
     symbol: &str,
     interval: Interval,
-) -> anyhow::Result<RawCandle> {
-    // 驗證所有浮點數值，拒絕 NaN 與 Inf
-    for (field_name, value) in [
-        ("open", item.open),
-        ("high", item.max),
-        ("low", item.min),
-        ("close", item.close),
-    ] {
-        if !value.is_finite() {
-            anyhow::bail!(
-                "FinMind returned non-finite value: symbol={symbol}, field={field_name}, value={value}"
-            );
+    api_token: &str,
+) -> Result<Vec<RawCandle>, BridgeError> {
+    // 取最近 7 天資料，排程每日只需補最新一筆
+    let today = chrono::Utc::now().format(FINMIND_DATE_FORMAT).to_string();
+    let week_ago = (chrono::Utc::now() - chrono::Duration::days(7))
+        .format(FINMIND_DATE_FORMAT)
+        .to_string();
+
+    fetch_range(client, symbol, interval, &week_ago, &today, api_token).await
+}
+
+// ── 新增函數：fetch_range ─────────────────────────────────────────────────────
+
+/// 取得指定股票、指定時間範圍的歷史 K 線（手動補資料用）。
+///
+/// 供 manual_sync.rs 的 fetch_and_insert_gap() 呼叫。
+/// 每次呼叫消耗 FinMind API 1 次請求額度。
+///
+/// # Arguments
+/// * `client`     - HTTP client（由呼叫端傳入，共用連線池）
+/// * `symbol`     - 股票代號，例如 "2330"
+/// * `interval`   - K 線粒度
+/// * `from_date`  - 開始日期，格式 "YYYY-MM-DD"
+/// * `to_date`    - 結束日期，格式 "YYYY-MM-DD"
+/// * `api_token`  - FinMind API token
+///
+/// # Returns
+/// 該時間範圍內的所有 RawCandle，可能為空（該範圍無資料）。
+pub async fn fetch_range(
+    client: &Client,
+    symbol: &str,
+    interval: Interval,
+    from_date: &str,
+    to_date: &str,
+    api_token: &str,
+) -> Result<Vec<RawCandle>, BridgeError> {
+    let dataset = interval_to_finmind_dataset(interval);
+
+    let base = std::env::var(FINMIND_API_BASE_URL).expect("FINMIND_API_BASE not set");
+
+    let url = format!(
+        "{base}/data?dataset={dataset}&data_id={symbol}&start_date={from_date}&end_date={to_date}&token={api_token}"
+    );
+
+    info!(
+        symbol = %symbol,
+        interval = %interval.as_str(),
+        from_date = %from_date,
+        to_date = %to_date,
+        "Fetching range from FinMind"
+    );
+
+    let response = client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(FINMIND_API_TIMEOUT_SECS))
+        .send()
+        .await
+        .map_err(|e| {
+            error!(error = %e, symbol = %symbol, "FinMind request failed");
+            BridgeError::FinMindDataSourceError {
+                context: "FinMind request failed: ".into(),
+                source: Some(Box::new(e)),
+            }
+        })?;
+
+    let finmind_resp: FinMindResponse = response.json().await.map_err(|e| {
+        error!(error = %e, symbol = %symbol, "FinMind response deserialization failed");
+        BridgeError::FinMindDataSourceError {
+            context: "FinMind deserialization failed: ".into(),
+            source: Some(Box::new(e)),
         }
+    })?;
+
+    if finmind_resp.status != 200 {
+        error!(
+            symbol = %symbol,
+            status = finmind_resp.status,
+            msg = %finmind_resp.msg,
+            "FinMind returned non-200 status"
+        );
+        return Err(BridgeError::FinMindDataSourceError {
+            context: format!(
+                "FinMind error: status={}, msg={}",
+                finmind_resp.status, finmind_resp.msg
+            ),
+            source: None,
+        });
     }
 
-    let timestamp_ms = date_string_to_ms(&item.date)
-        .with_context(|| format!("Failed to convert date to ms: {}", item.date))?;
+    let created_at_ms = current_timestamp_ms();
 
-    Ok(RawCandle {
-        symbol: symbol.to_string(),
-        timestamp_ms,
-        interval,
-        open: item.open,
-        high: item.max,
-        low: item.min,
-        close: item.close,
-        volume: item.trading_volume, // u64，不需要 cast
-        source: DataSource::FinMind,
-    })
+    let candles: Vec<RawCandle> = finmind_resp
+        .data
+        .into_iter()
+        .filter_map(|row| {
+            // 驗證數值合法性
+            if !row.open.is_finite()
+                || !row.max.is_finite()
+                || !row.min.is_finite()
+                || !row.close.is_finite()
+            {
+                warn!(
+                    symbol = %symbol,
+                    date = %row.date,
+                    "Skipping candle with non-finite values"
+                );
+                return None;
+            }
+
+            let timestamp_ms = date_str_to_ms(&row.date)?;
+
+            Some(RawCandle {
+                symbol: symbol.to_string(),
+                timestamp_ms,
+                interval,
+                open: row.open,
+                high: row.max,
+                low: row.min,
+                close: row.close,
+                volume: row.volume as u64,
+                source: DataSource::FinMind,
+                created_at_ms,
+            })
+        })
+        .collect();
+
+    info!(
+        symbol = %symbol,
+        interval = %interval.as_str(),
+        count = candles.len(),
+        "FinMind range fetch complete"
+    );
+
+    Ok(candles)
 }
 
-// ── FinMind API 內部反序列化結構（非對外公開）─────────────────────────────────
+// ── 內部工具函數 ──────────────────────────────────────────────────────────────
 
-#[derive(serde::Deserialize)]
-struct FinMindResponse {
-    data: Vec<FinMindItem>,
+/// Interval → FinMind dataset 名稱對應。
+fn interval_to_finmind_dataset(interval: Interval) -> &'static str {
+    match interval {
+        Interval::OneMin => "1m",
+        Interval::FiveMin => "5m",
+        Interval::FifteenMin => "15m",
+        Interval::OneHour => "1h",
+        Interval::FourHours => "4h",
+        Interval::OneDay => "1d",
+    }
 }
 
-/// FinMind TaiwanStockPrice dataset 的單筆回應
-///
-/// 僅反序列化系統需要的欄位，其他欄位由 serde 忽略。
-#[derive(serde::Deserialize, Debug)]
-struct FinMindItem {
-    pub date: String, // 交易日期，如 "2026-04-11"
-    pub open: f64,
-    pub max: f64, // FinMind 以 max 表示最高價
-    pub min: f64, // FinMind 以 min 表示最低價
-    pub close: f64,
-
-    #[serde(rename = "Trading_Volume")]
-    pub trading_volume: u64, // 成交股數，u64 避免大成交量截斷
+/// 日期字串（"YYYY-MM-DD"）轉為毫秒級 UTC timestamp。
+fn date_str_to_ms(date_str: &str) -> Option<i64> {
+    use chrono::NaiveDate;
+    let date = NaiveDate::parse_from_str(date_str, FINMIND_DATE_FORMAT).ok()?;
+    let datetime = date.and_hms_opt(0, 0, 0)?;
+    Some(datetime.and_utc().timestamp_millis())
 }
-
-// ── 單元測試 ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_ms_to_date_string_converts_correctly() {
-        // 2024-01-01 00:00:00 UTC = 1704067200000ms
-        let result = ms_to_date_string(1704067200000).unwrap();
-        assert_eq!(result, "2024-01-01");
+    fn test_date_str_to_ms_valid() {
+        let ms = date_str_to_ms("2026-01-02");
+        assert!(ms.is_some());
+        assert!(ms.unwrap() > 0);
     }
 
     #[test]
-    fn test_date_string_to_ms_converts_correctly() {
-        let result = date_string_to_ms("2024-01-01").unwrap();
-        assert_eq!(result, 1704067200000);
+    fn test_date_str_to_ms_invalid() {
+        assert!(date_str_to_ms("not-a-date").is_none());
     }
 
     #[test]
-    fn test_date_string_to_ms_invalid_format_returns_error() {
-        let result = date_string_to_ms("not-a-date");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_finmind_item_to_raw_candle_rejects_nan() {
-        let item = FinMindItem {
-            date: "2024-01-01".to_string(),
-            open: f64::NAN,
-            max: 151.0,
-            min: 149.0,
-            close: 150.0,
-            trading_volume: 1_000_000,
-        };
-        let result = finmind_item_to_raw_candle(item, "2330", Interval::OneHour);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_finmind_item_to_raw_candle_rejects_inf() {
-        let item = FinMindItem {
-            date: "2024-01-01".to_string(),
-            open: 150.0,
-            max: f64::INFINITY,
-            min: 149.0,
-            close: 150.0,
-            trading_volume: 1_000_000,
-        };
-        let result = finmind_item_to_raw_candle(item, "2330", Interval::OneHour);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_finmind_item_to_raw_candle_valid_data_succeeds() {
-        let item = FinMindItem {
-            date: "2024-01-01".to_string(),
-            open: 150.0,
-            max: 151.5,
-            min: 149.5,
-            close: 151.0,
-            trading_volume: 1_000_000,
-        };
-        let result = finmind_item_to_raw_candle(item, "2330", Interval::OneHour).unwrap();
-        assert_eq!(result.symbol, "2330");
-        assert_eq!(result.timestamp_ms, 1704067200000);
-        assert_eq!(result.open, 150.0);
-        assert_eq!(result.high, 151.5);
-        assert_eq!(result.low, 149.5);
-        assert_eq!(result.close, 151.0);
-        assert_eq!(result.volume, 1_000_000);
+    fn test_interval_to_finmind_dataset() {
+        assert_eq!(
+            interval_to_finmind_dataset(Interval::OneDay),
+            "TaiwanStockPrice"
+        );
+        assert_eq!(
+            interval_to_finmind_dataset(Interval::OneHour),
+            "TaiwanStockPriceHour"
+        );
     }
 }

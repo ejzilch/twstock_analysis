@@ -1,16 +1,18 @@
 mod ai_client;
 mod api;
+mod app_state;
 mod constants;
 mod core;
 mod data;
 mod models;
 
 use crate::ai_client::AiServiceClient;
+use crate::api::build_router;
 use crate::api::middleware::rate_limit::new_rate_limiter_state;
-use crate::api::{build_router, handlers::AppState};
+use crate::app_state::AppState;
 use crate::data::{
-    db::{BulkInsertBuffer, DbClient},
-    fetch_rate_limiter::{ApiTier, FinMindRateLimiter, RateLimitConfig},
+    db::BulkInsertBuffer,
+    fetch_rate_limiter::{ApiTier, FinMindRateLimiter},
 };
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -41,6 +43,8 @@ async fn main() -> anyhow::Result<()> {
 
     let redis_client = redis::Client::open(redis_url).expect("Failed to create Redis client");
 
+    let multiplexed_conn = redis_client.get_multiplexed_async_connection().await?;
+
     tracing::info!("Redis client initialized");
 
     // 初始化 FinMind Rate Limiter
@@ -52,19 +56,8 @@ async fn main() -> anyhow::Result<()> {
         _ => ApiTier::Free,
     };
 
-    let rate_limit_config = match finmind_tier {
-        ApiTier::Paid => RateLimitConfig::paid(),
-        ApiTier::Free => RateLimitConfig::free(),
-    };
-
-    let finmind_rate_limiter = Arc::new(FinMindRateLimiter::new(rate_limit_config));
+    let finmind_rate_limiter = FinMindRateLimiter::new(finmind_tier);
     tracing::info!(tier = ?finmind_tier, "FinMind rate limiter initialized");
-
-    // 初始化 DbClient
-    let db_client = Arc::new(DbClient {
-        pool: pg_pool.clone(),
-        redis_client: redis_client.clone(),
-    });
 
     // 初始化 BulkInsertBuffer
     let bulk_insert_buffer = Arc::new(tokio::sync::Mutex::new(BulkInsertBuffer::new()));
@@ -74,23 +67,28 @@ async fn main() -> anyhow::Result<()> {
         .expect("PYTHON_AI_SERVICE_URL must be set in environment");
 
     let ai_client =
-        Arc::new(AiServiceClient::new(ai_service_url).expect("Failed to create AI service client"));
+        AiServiceClient::new(ai_service_url).expect("Failed to create AI service client");
 
     tracing::info!("AI service client initialized");
 
-    // 組裝應用程式狀態
+    // 初始化 HTTP Client (AppState 需要這個)
+    let http_client = reqwest::Client::new();
+
+    // 直接組裝 AppState
     let app_state = Arc::new(AppState {
-        db_client: db_client.clone(),
+        db_pool: pg_pool.clone(), // 直接傳入 pg_pool
+        redis_client: multiplexed_conn.clone(),
         ai_client: ai_client.clone(),
         rate_limiter: finmind_rate_limiter,
+        http_client, // 傳入剛剛建立的 http_client
     });
 
     // 組裝 Router
     let rate_limiter_state = new_rate_limiter_state();
-    let app = build_router(app_state, rate_limiter_state);
+    let app = build_router(app_state.clone(), rate_limiter_state);
 
     // 啟動 TCP 監聽
-    let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8089".to_string());
+    let bind_addr = std::env::var("BIND_ADDR").unwrap_or_else(|_| "127.0.0.1:8089".to_string());
     let listener = TcpListener::bind(&bind_addr).await?;
 
     tracing::info!(addr = %bind_addr, "Server listening");
@@ -114,7 +112,11 @@ async fn main() -> anyhow::Result<()> {
     // 步驟 3: Flush BulkInsertBuffer 剩餘資料
     {
         let mut buffer = bulk_insert_buffer.lock().await;
-        if let Err(e) = buffer.flush_and_close(&db_client).await {
+        let mut redis_conn = app_state.cache_invalidator()?;
+        if let Err(e) = buffer
+            .flush_and_close(&app_state.db_writer(), &mut redis_conn)
+            .await
+        {
             tracing::error!(error = %e, "Failed to flush BulkInsertBuffer during shutdown");
         }
     }

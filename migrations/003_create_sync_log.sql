@@ -1,3 +1,4 @@
+SET client_encoding = 'UTF8';
 -- Migration: 003_create_sync_log.sql
 -- 目的: 新增 sync_log table，記錄每次同步（排程 + 手動）的完整歷史
 --       供狀態查詢、結果追蹤、日後「同步歷史」功能使用

@@ -65,6 +65,19 @@ const ERROR_MAP: Record<ErrorCode, ErrorUIAction> = {
         variant: 'silent',
         message: '',
     },
+    SYNC_ALREADY_RUNNING: {
+        variant: 'warning',
+        message: '同步執行中，請稍候',
+    },
+    SYNC_NOT_FOUND: {
+        variant: 'silent',
+        message: '',
+    },
+    FINMIND_UNAVAILABLE: {
+        variant: 'error',
+        message: 'FinMind 暫時無法連線，請稍後重試',
+        showRetry: true,
+    },
 }
 
 export function resolveErrorAction(error: unknown): ErrorUIAction {

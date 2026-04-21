@@ -36,7 +36,7 @@ export async function apiClient<T>(
         'X-API-KEY': getApiKey(),
         ...(init.headers ?? {}),
     }
-
+    console.log(headers);
     const response = await fetch(url, { ...init, headers })
 
     if (!response.ok) {

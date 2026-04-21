@@ -1,9 +1,9 @@
 use crate::ai_client::client::{PredictRequest, PredictResponse};
-use crate::api::handlers::health::AppState;
 use crate::api::middleware::ApiError;
 use crate::api::models::enums::{ReliabilityLevel, SignalSource};
 use crate::api::models::request::SignalsQueryParams;
 use crate::api::models::response::{SignalsApiResponse, TradeSignalResponse};
+use crate::app_state::AppState;
 use crate::constants::{ERROR_AI_SERVICE_TIMEOUT, ERROR_AI_SERVICE_UNAVAILABLE};
 use crate::core::BridgeError;
 use crate::models::enums::SignalType;
@@ -34,11 +34,11 @@ pub async fn signals_handler(
         request_id: Uuid::new_v4().to_string(),
         symbol: symbol.clone(),
         indicators: indicators.clone(),
-        lookback_hours: crate::constants::TIMEOUT_AI_SERVICE_SECS as i64,
+        lookback_hours: crate::constants::AI_SERVICE_TIMEOUT_SECS as i64,
     };
 
     let signal = match timeout(
-        Duration::from_secs(crate::constants::TIMEOUT_AI_SERVICE_SECS),
+        Duration::from_secs(crate::constants::AI_SERVICE_TIMEOUT_SECS),
         state.ai_client.predict(&predict_request),
     )
     .await
@@ -53,8 +53,8 @@ pub async fn signals_handler(
                 BridgeError::PythonConnectionLost { .. } => ERROR_AI_SERVICE_UNAVAILABLE,
                 BridgeError::PythonInternalError { message, traceback } => {
                     tracing::error!(
-                        symbol           = %symbol,
-                        python_error     = %message,
+                        symbol = %symbol,
+                        python_error = %message,
                         python_traceback = traceback.as_deref().unwrap_or("none"),
                         "Python internal error, falling back to technical signal"
                     );
@@ -64,8 +64,8 @@ pub async fn signals_handler(
             };
 
             tracing::warn!(
-                symbol         = %symbol,
-                bridge_error   = %bridge_error,
+                symbol = %symbol,
+                bridge_error = %bridge_error,
                 fallback_reason = fallback_reason,
                 "AI service error, falling back to technical signal"
             );
@@ -76,8 +76,8 @@ pub async fn signals_handler(
         // Timeout
         Err(_elapsed) => {
             tracing::warn!(
-                symbol         = %symbol,
-                timeout_secs   = crate::constants::TIMEOUT_AI_SERVICE_SECS,
+                symbol = %symbol,
+                timeout_secs = crate::constants::AI_SERVICE_TIMEOUT_SECS,
                 fallback_reason = ERROR_AI_SERVICE_TIMEOUT,
                 "AI service timed out, falling back to technical signal"
             );
@@ -102,7 +102,7 @@ pub async fn signals_handler(
 // ── 信號建構函數 ──────────────────────────────────────────────────────────────
 
 fn build_ai_signal(
-    symbol: &str,
+    _symbol: &str,
     prediction: &PredictResponse,
     timestamp_ms: i64,
 ) -> TradeSignalResponse {
@@ -138,7 +138,7 @@ fn build_ai_signal(
 }
 
 fn build_technical_fallback_signal(
-    symbol: &str,
+    _symbol: &str,
     indicators: &std::collections::HashMap<String, f64>,
     fallback_reason: &str,
     timestamp_ms: i64,
@@ -177,23 +177,17 @@ async fn fetch_indicators_for_signal(
     // 從 Redis 快取取最新指標，若無則回傳空 map（降級處理）
     let cache_key = format!("indicators:{symbol}:1h");
 
-    if let Ok(mut conn) = state
-        .db_client
-        .redis_client
-        .get_multiplexed_async_connection()
-        .await
-    {
-        let cached: redis::RedisResult<Option<String>> = redis::cmd("GET")
-            .arg(&cache_key)
-            .query_async(&mut conn)
-            .await;
+    let mut conn = state.redis_client.clone();
+    let cached: redis::RedisResult<Option<String>> = redis::cmd("GET")
+        .arg(&cache_key)
+        .query_async(&mut conn)
+        .await;
 
-        if let Ok(Some(json_str)) = cached {
-            if let Ok(indicators) =
-                serde_json::from_str::<std::collections::HashMap<String, f64>>(&json_str)
-            {
-                return Ok(indicators);
-            }
+    if let Ok(Some(json_str)) = cached {
+        if let Ok(indicators) =
+            serde_json::from_str::<std::collections::HashMap<String, f64>>(&json_str)
+        {
+            return Ok(indicators);
         }
     }
 

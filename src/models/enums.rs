@@ -1,59 +1,36 @@
 use serde::{Deserialize, Serialize};
+use sqlx::Type;
 use std::fmt;
 use std::str::FromStr;
+use strum::Display;
+
+/// 外部資料來源
+///
+/// fetch.rs 內部做 normalization，對外統一輸出 RawCandle，
+/// 上層模組不需感知來源差異。
+/// serde rename 確保序列化結果為 "finmind" / "yfinance"，
+/// 對應 API_CONTRACT.md 的 data_source 欄位格式。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
+#[serde(rename_all = "snake_case")]
+pub enum DataSource {
+    /// 主力來源：台股 (TWSE / TPEX)，走排程限流
+    FinMind,
+    /// 備用來源：補歷史資料用，禁止放在即時路徑
+    YFinance,
+}
 
 /// 交易所
 ///
 /// 對應 API_CONTRACT.md 的 exchange 欄位與 init_schema.sql 的 exchange 欄位。
 /// serde UPPERCASE 確保序列化結果為 "TWSE" / "TPEX"。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, Type)]
+#[sqlx(type_name = "text")]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Exchange {
     /// 台灣證券交易所
     Twse,
     /// 證券櫃檯買賣中心
     Tpex,
-}
-
-impl Exchange {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Exchange::Twse => "TWSE",
-            Exchange::Tpex => "TPEX",
-        }
-    }
-}
-
-impl From<String> for Exchange {
-    fn from(s: String) -> Self {
-        // 使用 s.parse() 會自動去呼叫你實作的 FromStr
-        s.parse().unwrap_or_else(|_| {
-            // 遵循系統設計規範：記錄異常並給予安全回退
-            tracing::warn!("資料庫發現非法交易所字串: {}, 預設回退至 Twse", s);
-            Exchange::Twse
-        })
-    }
-}
-
-impl fmt::Display for Exchange {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Exchange::Twse => write!(f, "TWSE"),
-            Exchange::Tpex => write!(f, "TPEX"),
-        }
-    }
-}
-
-impl FromStr for Exchange {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_uppercase().as_str() {
-            "TWSE" => Ok(Exchange::Twse),
-            "TPEX" => Ok(Exchange::Tpex),
-            other => anyhow::bail!("Unknown exchange: {other}"),
-        }
-    }
 }
 
 /// K 線時間週期
@@ -185,8 +162,8 @@ mod tests {
 
     #[test]
     fn test_exchange_from_str_case_insensitive() {
-        assert_eq!("twse".parse::<Exchange>().unwrap(), Exchange::Twse);
-        assert_eq!("TPEX".parse::<Exchange>().unwrap(), Exchange::Tpex);
+        assert_eq!("twse", Exchange::Twse.to_string());
+        assert_eq!("TPEX", Exchange::Tpex.to_string());
     }
 
     #[test]

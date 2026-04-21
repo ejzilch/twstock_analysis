@@ -1,4 +1,4 @@
-use crate::data::models::DataSource;
+use crate::models::DataSource;
 use crate::models::Exchange;
 use serde::{Deserialize, Serialize};
 

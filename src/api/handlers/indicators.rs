@@ -1,5 +1,5 @@
-use crate::api::handlers::health::AppState;
 use crate::api::middleware::ApiError;
+use crate::app_state::AppState;
 use crate::core::indicators::factory::IndicatorFactory;
 use crate::models::indicators::{ComputeIndicatorsRequest, ComputeIndicatorsResponse};
 use crate::models::Interval;
@@ -94,7 +94,7 @@ async fn fetch_candles_for_compute(
         from_ms,
         to_ms
     )
-    .fetch_all(&state.db_client.pool)
+    .fetch_all(&state.db_pool)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to fetch candles for indicator compute");

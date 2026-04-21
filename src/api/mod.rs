@@ -2,6 +2,9 @@ pub mod handlers;
 pub mod middleware;
 pub mod models;
 
+use crate::api::handlers::admin_sync::{
+    get_sync_status, get_sync_status_by_id, trigger_manual_sync,
+};
 use crate::api::{
     handlers::{
         backtest::backtest_handler,
@@ -11,13 +14,13 @@ use crate::api::{
         predict::predict_handler,
         signals::signals_handler,
         symbols::symbols_handler,
-        AppState,
     },
     middleware::{
         auth::auth_middleware,
         rate_limit::{rate_limit_middleware, RateLimiterState},
     },
 };
+use crate::app_state::AppState;
 use axum::{
     http::{HeaderValue, Method},
     routing::{get, post},
@@ -58,6 +61,12 @@ pub fn build_router(app_state: Arc<AppState>, rate_limiter: RateLimiterState) ->
         .route("/signals/:symbol", get(signals_handler))
         .route("/predict", post(predict_handler))
         .route("/backtest", post(backtest_handler))
+        .route("/api/v1/admin/sync", post(trigger_manual_sync))
+        .route("/api/v1/admin/sync/status", get(get_sync_status))
+        .route(
+            "/api/v1/admin/sync/status/:sync_id",
+            get(get_sync_status_by_id),
+        )
         .layer(cors)
         .layer(axum::middleware::from_fn(auth_middleware))
         .layer(axum::middleware::from_fn_with_state(
