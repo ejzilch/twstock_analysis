@@ -49,11 +49,13 @@ export const RELIABILITY_BADGE: Record<ReliabilityLevel, BadgeConfig> = {
 
 // Zustand store shape
 export interface AppState {
+    activeSyncId: string | null,
     selectedSymbol: string
     selectedInterval: string
     isEcoModeEnabled: boolean
     apiKey: string
     colorMode: 'TW' | 'US'
+    setActiveSyncId: (id: string | null) => void
     toggleColorMode: () => void
     setSelectedSymbol: (symbol: string) => void
     setSelectedInterval: (interval: string) => void

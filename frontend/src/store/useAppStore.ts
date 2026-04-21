@@ -10,11 +10,13 @@ import type { AppState } from '@/src/types/app'
 export const useAppStore = create<AppState>()(
     persist(
         (set) => ({
+            activeSyncId: null,
             selectedSymbol: '2330',
             selectedInterval: '1h',
             isEcoModeEnabled: true,
             apiKey: '',
 
+            setActiveSyncId: (id) => set({ activeSyncId: id }),
             setSelectedSymbol: (symbol) => set({ selectedSymbol: symbol }),
             setSelectedInterval: (interval) => set({ selectedInterval: interval }),
             toggleEcoMode: () => set((s) => ({ isEcoModeEnabled: !s.isEcoModeEnabled })),
@@ -28,6 +30,7 @@ export const useAppStore = create<AppState>()(
         {
             name: 'ai-bridge-ui',
             partialize: (s) => ({
+                activeSyncId: s.activeSyncId,
                 selectedSymbol: s.selectedSymbol,
                 selectedInterval: s.selectedInterval,
                 isEcoModeEnabled: s.isEcoModeEnabled,
