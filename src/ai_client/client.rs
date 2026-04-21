@@ -48,7 +48,7 @@ struct PythonErrorEnvelope {
 /// - BridgeError 轉換（各種失敗情境 -> 統一錯誤類型）
 /// - JSON / MsgPack 序列化自動選擇
 /// - Python traceback 寫入 tracing log，不對外暴露
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AiServiceClient {
     client: Client,
     base_url: String,

@@ -6,6 +6,7 @@ use reqwest::Client;
 use sqlx::PgPool;
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct AppState {
     pub db_pool: PgPool,
     pub redis_client: MultiplexedConnection,

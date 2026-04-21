@@ -48,12 +48,21 @@ pub struct BacktestResponse {
 
 /// POST /api/v1/backtest
 ///
-/// 回測引擎由 Python Codex 實作，Rust Gateway 轉發請求。
+/// Rust Gateway 轉發請求。
 /// 回測指標計算依賴 POST /api/v1/indicators/compute，確保與實盤一致。
 pub async fn backtest_handler(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Json(request): Json<BacktestRequest>,
 ) -> Result<Json<BacktestResponse>, ApiError> {
+    // request_id 帶入 tracing span，讓這次請求的所有 log 可以關聯
+    tracing::info!(
+        request_id = %request.request_id,
+        symbol = %request.symbol,
+        strategy = %request.strategy_name,
+        state = ?state,
+        "Backtest request received"
+    );
+
     // 基本參數驗證
     if request.initial_capital <= 0.0 {
         return Err(ApiError::InvalidIndicatorConfig {
