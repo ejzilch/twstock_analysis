@@ -49,6 +49,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # ── 環境變數 ──────────────────────────────────────────────────────────────────
 dotenvy = "0.15"
 
+# ── 自動生成 as_str() ─────────────────────────────────────────────────────────
+strum = { version = "0.28", features = ["derive"] }
+
+async-trait = "0.1.89"
+
 [dev-dependencies]
 # 整合測試用的非同步測試 macro
 tokio-test = "0.4"

@@ -1,6 +1,6 @@
 use crate::ai_client::client::PredictRequest;
-use crate::api::handlers::health::AppState;
 use crate::api::middleware::ApiError;
+use crate::app_state::AppState;
 use axum::{extract::State, Json};
 use serde::Deserialize;
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -33,26 +33,26 @@ pub async fn predict_handler(
     };
 
     let result = timeout(
-        Duration::from_secs(crate::constants::TIMEOUT_AI_SERVICE_SECS),
+        Duration::from_secs(crate::constants::AI_SERVICE_TIMEOUT_SECS),
         state.ai_client.predict(&predict_request),
     )
     .await;
 
     match result {
         Ok(Ok(prediction)) => Ok(Json(serde_json::json!({
-            "symbol":           prediction.symbol,
-            "up_probability":   prediction.up_probability,
+            "symbol": prediction.symbol,
+            "up_probability": prediction.up_probability,
             "down_probability": prediction.down_probability,
             "confidence_score": prediction.confidence_score,
-            "model_version":    prediction.model_version,
+            "model_version": prediction.model_version,
             "inference_time_ms": prediction.inference_time_ms,
-            "computed_at_ms":   prediction.computed_at_ms,
+            "computed_at_ms": prediction.computed_at_ms,
         }))),
 
         Ok(Err(bridge_error)) => {
             tracing::error!(
                 symbol = %request.symbol,
-                error  = %bridge_error,
+                error = %bridge_error,
                 "AI service error in predict handler"
             );
             Err(ApiError::AiServiceUnavailable)
@@ -60,8 +60,8 @@ pub async fn predict_handler(
 
         Err(_timeout) => {
             tracing::warn!(
-                symbol       = %request.symbol,
-                timeout_secs = crate::constants::TIMEOUT_AI_SERVICE_SECS,
+                symbol = %request.symbol,
+                timeout_secs = crate::constants::AI_SERVICE_TIMEOUT_SECS,
                 "AI service timed out in predict handler"
             );
             Err(ApiError::AiServiceTimeout)

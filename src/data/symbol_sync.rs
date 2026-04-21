@@ -1,205 +1,145 @@
-use crate::constants;
-use crate::data::models::DataSource;
-use anyhow::Context;
-use chrono::Utc;
-use sqlx::{PgPool, Postgres, QueryBuilder};
-use std::time::Duration;
-
-// ── 內部反序列化結構（非對外公開）────────────────────────────────────────────
-
-#[derive(serde::Deserialize, Debug)]
-struct FinMindInfoResponse {
-    data: Vec<FinMindStockInfo>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-struct FinMindStockInfo {
-    pub stock_id: String,
-    pub stock_name: String,
-    // FinMind 以 "type" 回傳交易所類型，為 Rust 關鍵字故使用 rename
-    #[serde(rename = "type")]
-    pub stock_type: String, // "twse" / "tpex"
-}
-
-// ── 公開型別 ─────────────────────────────────────────────────────────────────
-
-/// 動態 Symbol 清單同步器
+/// src/data/symbol_sync.rs
 ///
-/// 每日 02:00 排程呼叫 sync_symbols()，從 FinMind TaiwanStockInfo 取得最新清單。
-/// 新增標的寫入並標記 is_active = true。
-/// 下市標的標記 is_active = false，保留歷史資料不刪除。
-pub struct SymbolSyncer {
-    client: reqwest::Client,
-    pool: PgPool,
+/// 動態 Symbol 清單同步。
+///
+/// 在現有基礎上新增：
+///   同步時一併寫入 finmind_earliest_ms，
+///   供 manual_sync.rs detect_gaps() 計算歷史補齊的起點。
+use sqlx::PgPool;
+use tracing::{error, info, warn};
+
+use crate::core::BridgeError;
+use crate::models::enums::{DataSource, Exchange};
+
+/// Symbol 同步資料（從 FinMind 取得）。
+#[derive(Debug)]
+pub struct SymbolSyncData {
+    pub symbol: String,
+    pub name: String,
+    pub exchange: Exchange,
+    pub data_source: DataSource,
+    /// FinMind 可提供的最早資料日期（毫秒）。
+    /// 若 FinMind 無此資訊則為 None。
+    pub finmind_earliest_ms: Option<i64>,
+    pub latest_ms: i64,
+    pub is_active: bool,
 }
 
-impl SymbolSyncer {
-    /// 建立新的 SymbolSyncer，reqwest Client 設定 15s timeout
-    pub fn new(pool: PgPool) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(constants::TIMEOUT_FINMIND_SECS))
-            .build()
-            .expect("Failed to build reqwest Client for SymbolSyncer");
+/// 將 Symbol 清單寫入 DB，包含 finmind_earliest_ms。
+///
+/// 使用 UPSERT（INSERT ... ON CONFLICT DO UPDATE）確保冪等性。
+/// 下市標的 is_active = false，歷史資料保留。
+pub async fn upsert_symbols(
+    db_pool: &PgPool,
+    symbols: &[SymbolSyncData],
+    synced_at_ms: i64,
+) -> Result<SyncSummary, BridgeError> {
+    let mut inserted = 0u32;
+    let mut updated = 0u32;
+    let mut failed = 0u32;
 
-        Self { client, pool }
-    }
-
-    /// 執行完整 Symbol 清單同步
-    ///
-    /// 同步流程：
-    /// 1. 從 FinMind 取得最新股票清單，過濾 TWSE / TPEX 標的
-    /// 2. Bulk Upsert：新增或更新現有標的，is_active = true
-    /// 3. 批次標記下市標的：本次 API 未回傳的 active 標的設為 is_active = false
-    /// 4. COMMIT 事務，寫入 tracing log
-    pub async fn sync_symbols(&self) -> anyhow::Result<()> {
-        let url = "https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockInfo";
-
-        let response: FinMindInfoResponse = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .context("Failed to fetch stock info from FinMind")?
-            .json()
-            .await
-            .context("Failed to parse FinMind stock info JSON")?;
-
-        // 過濾只保留 TWSE / TPEX 標的，排除其他類型
-        let valid_stocks: Vec<&FinMindStockInfo> = response
-            .data
-            .iter()
-            .filter(|s| {
-                s.stock_type == constants::FINMIND_EXCHANGE_TWSE
-                    || s.stock_type == constants::FINMIND_EXCHANGE_TPEX
-            })
-            .collect();
-
-        if valid_stocks.is_empty() {
-            tracing::warn!(
-                "FinMind returned no valid TWSE/TPEX stocks, skipping sync to avoid data loss"
-            );
-            return Ok(());
-        }
-
-        let fetched_symbol_ids: Vec<String> =
-            valid_stocks.iter().map(|s| s.stock_id.clone()).collect();
-
-        let now_ms = Utc::now().timestamp_millis();
-        let source_str = DataSource::FinMind.to_string();
-
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .context("Failed to begin symbol sync transaction")?;
-
-        // 步驟 1: Bulk Upsert，新增或更新標的
-        // exchange 以 to_uppercase() 轉換 "twse" -> "TWSE", "tpex" -> "TPEX"
-        // 對應 API_CONTRACT.md 與 init_schema.sql 的 exchange 欄位格式
-        let mut query_builder: QueryBuilder<Postgres> = QueryBuilder::new(
-            "INSERT INTO symbols \
-             (symbol, name, exchange, data_source, is_active, updated_at_ms) ",
-        );
-
-        query_builder.push_values(&valid_stocks, |mut b, stock| {
-            b.push_bind(&stock.stock_id)
-                .push_bind(&stock.stock_name)
-                .push_bind(stock.stock_type.to_uppercase()) // "twse" -> "TWSE"
-                .push_bind(&source_str)
-                .push_bind(true)
-                .push_bind(now_ms);
-        });
-
-        query_builder.push(
-            " ON CONFLICT (symbol) DO UPDATE SET \
-             name          = EXCLUDED.name,          \
-             exchange      = EXCLUDED.exchange,      \
-             is_active     = true,                   \
-             updated_at_ms = EXCLUDED.updated_at_ms",
-        );
-
-        query_builder
-            .build()
-            .execute(&mut *transaction)
-            .await
-            .context("Failed to execute bulk upsert for symbols")?;
-
-        // 步驟 2: 批次標記下市標的
-        // 找出原本 is_active = true 但本次 API 未回傳的標的，標記為下市
-        let delisted_count = sqlx::query(
-            "UPDATE symbols \
-             SET is_active = false, updated_at_ms = $1 \
-             WHERE is_active = true AND NOT (symbol = ANY($2))",
+    for symbol_data in symbols {
+        let result = sqlx::query!(
+            r#"
+            INSERT INTO symbols (
+                symbol, name, exchange, data_source,
+                finmind_earliest_ms,
+                earliest_ms, latest_ms,
+                is_active, updated_at_ms
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (symbol) DO UPDATE SET
+                name                  = EXCLUDED.name,
+                exchange              = EXCLUDED.exchange,
+                data_source           = EXCLUDED.data_source,
+                -- finmind_earliest_ms 只有在 FinMind 回傳非 NULL 時才更新
+                -- 避免後續同步因資料缺失而誤清除已知的最早日期
+                finmind_earliest_ms   = COALESCE(
+                                            EXCLUDED.finmind_earliest_ms,
+                                            symbols.finmind_earliest_ms
+                                        ),
+                latest_ms   = EXCLUDED.latest_ms,
+                is_active             = EXCLUDED.is_active,
+                updated_at_ms         = EXCLUDED.updated_at_ms
+            "#,
+            symbol_data.symbol,
+            symbol_data.name,
+            symbol_data.exchange.to_string(),
+            symbol_data.data_source.to_string(),
+            symbol_data.finmind_earliest_ms,
+            // earliest_available_ms 與 finmind_earliest_ms 相同來源
+            symbol_data.finmind_earliest_ms.unwrap_or(0),
+            symbol_data.latest_ms,
+            symbol_data.is_active,
+            synced_at_ms,
         )
-        .bind(now_ms)
-        .bind(&fetched_symbol_ids)
-        .execute(&mut *transaction)
-        .await
-        .context("Failed to mark delisted symbols as inactive")?
-        .rows_affected();
+        .execute(db_pool)
+        .await;
 
-        if delisted_count > 0 {
-            tracing::info!(
-                delisted_count = delisted_count,
-                "Marked symbols as inactive (delisted)"
-            );
+        match result {
+            Ok(r) => {
+                if r.rows_affected() == 1 {
+                    inserted += 1;
+                } else {
+                    updated += 1;
+                }
+            }
+            Err(e) => {
+                error!(
+                    error = %e,
+                    symbol = %symbol_data.symbol,
+                    "Failed to upsert symbol"
+                );
+                failed += 1;
+            }
         }
-
-        // 步驟 3: COMMIT
-        transaction
-            .commit()
-            .await
-            .context("Failed to commit symbol sync transaction")?;
-
-        tracing::info!(
-            synced_count = fetched_symbol_ids.len(),
-            delisted_count = delisted_count,
-            "Symbol sync completed successfully"
-        );
-
-        Ok(())
     }
+
+    info!(
+        inserted = inserted,
+        updated = updated,
+        failed = failed,
+        "Symbol sync complete"
+    );
+
+    Ok(SyncSummary {
+        inserted,
+        updated,
+        failed,
+    })
 }
 
-// ── 單元測試 ──────────────────────────────────────────────────────────────────
+/// 查詢特定 symbol 的 finmind_earliest_ms。
+/// 供 detect_gaps() 使用。
+pub async fn get_finmind_earliest_ms(
+    db_pool: &PgPool,
+    symbol: &str,
+) -> Result<Option<i64>, BridgeError> {
+    let row = sqlx::query!(
+        r#"
+        SELECT finmind_earliest_ms
+        FROM symbols
+        WHERE symbol = $1
+        "#,
+        symbol,
+    )
+    .fetch_optional(db_pool)
+    .await
+    .map_err(|e| {
+        error!(error = %e, symbol = %symbol, "Failed to query finmind_earliest_ms");
+        BridgeError::FinMindDataSourceError {
+            context: "Failed to query finmind_earliest_ms: ".into(),
+            source: Some(Box::new(e)),
+        }
+    })?;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    Ok(row.and_then(|r| r.finmind_earliest_ms))
+}
 
-    #[test]
-    fn test_exchange_uppercase_conversion() {
-        // 確認 FinMind stock_type 轉換為 DB 欄位格式的邏輯正確
-        assert_eq!("twse".to_uppercase(), "TWSE");
-        assert_eq!("tpex".to_uppercase(), "TPEX");
-    }
-
-    #[test]
-    fn test_filter_excludes_non_twse_tpex() {
-        let stocks = vec![
-            FinMindStockInfo {
-                stock_id: "2330".to_string(),
-                stock_name: "台積電".to_string(),
-                stock_type: "twse".to_string(),
-            },
-            FinMindStockInfo {
-                stock_id: "6547".to_string(),
-                stock_name: "高端疫苗".to_string(),
-                stock_type: "tpex".to_string(),
-            },
-            FinMindStockInfo {
-                stock_id: "0000".to_string(),
-                stock_name: "其他類型".to_string(),
-                stock_type: "other".to_string(),
-            },
-        ];
-
-        let valid: Vec<&FinMindStockInfo> = stocks
-            .iter()
-            .filter(|s| s.stock_type == "twse" || s.stock_type == "tpex")
-            .collect();
-
-        assert_eq!(valid.len(), 2);
-        assert!(valid.iter().all(|s| s.stock_type != "other"));
-    }
+/// Symbol 同步結果摘要。
+#[derive(Debug)]
+pub struct SyncSummary {
+    pub inserted: u32,
+    pub updated: u32,
+    pub failed: u32,
 }

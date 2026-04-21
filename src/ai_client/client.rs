@@ -36,7 +36,6 @@ pub struct PredictResponse {
 /// 對應 ARCH_DESIGN.md 約定的 Python 非 2xx 回應格式。
 #[derive(Debug, Deserialize)]
 struct PythonErrorEnvelope {
-    pub error: String,
     pub message: String,
     pub traceback: Option<String>,
 }
@@ -49,6 +48,7 @@ struct PythonErrorEnvelope {
 /// - BridgeError 轉換（各種失敗情境 -> 統一錯誤類型）
 /// - JSON / MsgPack 序列化自動選擇
 /// - Python traceback 寫入 tracing log，不對外暴露
+#[derive(Clone)]
 pub struct AiServiceClient {
     client: Client,
     base_url: String,

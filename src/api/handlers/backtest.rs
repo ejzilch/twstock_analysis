@@ -1,5 +1,5 @@
-use crate::api::handlers::health::AppState;
 use crate::api::middleware::ApiError;
+use crate::app_state::AppState;
 use axum::{extract::State, Json};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -51,7 +51,7 @@ pub struct BacktestResponse {
 /// 回測引擎由 Python Codex 實作，Rust Gateway 轉發請求。
 /// 回測指標計算依賴 POST /api/v1/indicators/compute，確保與實盤一致。
 pub async fn backtest_handler(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     Json(request): Json<BacktestRequest>,
 ) -> Result<Json<BacktestResponse>, ApiError> {
     // 基本參數驗證

@@ -1,6 +1,6 @@
-use crate::api::handlers::health::AppState;
 use crate::api::middleware::ApiError;
 use crate::api::models::request::SymbolsQueryParams;
+use crate::app_state::AppState;
 use crate::models::Exchange;
 use axum::{
     extract::{Query, State},
@@ -65,7 +65,7 @@ async fn fetch_symbols(
             sqlx::query_as!(
                 SymbolRow,
                 r#"
-                SELECT symbol, name, exchange, data_source,
+                SELECT symbol, name, exchange as "exchange: Exchange", data_source,
                        COALESCE(earliest_ms, 0) AS "earliest_ms!",
                        COALESCE(latest_ms, 0)   AS "latest_ms!",
                        is_active, updated_at_ms
@@ -74,16 +74,16 @@ async fn fetch_symbols(
                 ORDER BY symbol ASC
                 "#,
                 is_active,
-                ex.as_str()
+                ex.to_string()
             )
-            .fetch_all(&state.db_client.pool)
+            .fetch_all(&state.db_pool)
             .await
         }
         None => {
             sqlx::query_as!(
                 SymbolRow,
                 r#"
-                SELECT symbol, name, exchange, data_source,
+                SELECT symbol, name, exchange as "exchange: Exchange", data_source,
                        COALESCE(earliest_ms, 0) AS "earliest_ms!",
                        COALESCE(latest_ms, 0)   AS "latest_ms!",
                        is_active, updated_at_ms
@@ -93,7 +93,7 @@ async fn fetch_symbols(
                 "#,
                 is_active
             )
-            .fetch_all(&state.db_client.pool)
+            .fetch_all(&state.db_pool)
             .await
         }
     };
@@ -107,7 +107,7 @@ async fn fetch_symbols(
 
 async fn fetch_last_synced_ms(state: &AppState) -> Option<i64> {
     sqlx::query_scalar!("SELECT MAX(updated_at_ms) FROM symbols")
-        .fetch_one(&state.db_client.pool)
+        .fetch_one(&state.db_pool)
         .await
         .ok()
         .flatten()

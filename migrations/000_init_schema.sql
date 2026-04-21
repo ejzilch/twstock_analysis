@@ -1,3 +1,4 @@
+SET client_encoding = 'UTF8';
 -- 動態股票清單
 CREATE TABLE IF NOT EXISTS symbols (
     symbol          VARCHAR(20)  PRIMARY KEY,

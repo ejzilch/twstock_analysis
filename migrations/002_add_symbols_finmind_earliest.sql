@@ -1,3 +1,4 @@
+SET client_encoding = 'UTF8';
 -- Migration: 002_add_symbols_finmind_earliest.sql
 -- 目的: symbols table 新增 FinMind 最早可提供資料的時間戳
 --       供缺口偵測邏輯（detect_gaps）判斷歷史補齊的起點

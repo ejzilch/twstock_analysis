@@ -1,3 +1,4 @@
+SET client_encoding = 'UTF8';
 -- Migration: 001_add_candle_audit_fields.sql
 -- 目的: candles table 新增寫入時間與資料來源欄位
 -- 執行順序: 必須在 002 之前執行
