@@ -24,7 +24,7 @@ pub enum DataSource {
 /// 對應 API_CONTRACT.md 的 exchange 欄位與 init_schema.sql 的 exchange 欄位。
 /// serde UPPERCASE 確保序列化結果為 "TWSE" / "TPEX"。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, Type)]
-#[sqlx(type_name = "text")]
+#[sqlx(type_name = "text", rename_all = "UPPERCASE")]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Exchange {
     /// 台灣證券交易所

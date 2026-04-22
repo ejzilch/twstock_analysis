@@ -47,6 +47,15 @@ export function useTriggerSync() {
   const setActiveSyncId = useAppStore((s) => s.setActiveSyncId)
   const queryClient = useQueryClient()
 
+  function extractConflictSyncId(error: Error): string | null {
+    if (!(error instanceof ApiErrorException)) return null
+    if (error.httpStatus !== 409) return null
+    if (error.errorCode !== 'SYNC_ALREADY_RUNNING') return null
+
+    const raw = error.apiError as unknown as { sync_id?: unknown }
+    return typeof raw.sync_id === 'string' && raw.sync_id.length > 0 ? raw.sync_id : null
+  }
+
   return useMutation<
     ManualSyncAcceptedResponse,
     Error,
@@ -100,6 +109,14 @@ export function useTriggerSync() {
           total_failed: 0,
         },
       } satisfies SyncStatusResponse)
+    },
+    onError: (error) => {
+      // 409: 已有同步進行中 → 接手既有 sync_id，直接切到進度輪詢
+      const syncId = extractConflictSyncId(error)
+      if (!syncId) return
+
+      setActiveSyncId(syncId)
+      queryClient.invalidateQueries({ queryKey: ['sync-status', syncId] })
     },
   })
 }

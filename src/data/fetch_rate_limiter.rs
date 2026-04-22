@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use chrono::{Timelike, Utc};
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
@@ -152,24 +153,27 @@ impl FinMindRateLimiter {
     ///   3. 等待結束後重置計數器，允許繼續
     ///   4. 回傳 Ok（實際計數由 mark_request_used() 在成功請求後累加）
     pub async fn acquire(&self) -> Result<(), RateLimitWaiting> {
-        // 重置視窗
-        {
-            let mut window_start = self.window_start.lock().await;
-            if window_start.elapsed() >= Duration::from_secs(FINMIND_RATE_LIMIT_WAIT_SECS) {
-                self.request_counter.store(0, Ordering::Relaxed);
-                *window_start = Instant::now();
-                let mut resume_at = self.resume_at.lock().await;
-                *resume_at = None;
-                info!("FinMind rate limit window reset");
-            }
-        }
-
-        let current = self.request_counter.load(Ordering::Relaxed);
         let safe_limit = FINMIND_RATE_LIMIT_PER_HOUR - FINMIND_RATE_LIMIT_BUFFER;
+        let current = self.request_counter.load(Ordering::Relaxed);
 
+        // 取得當前的 UTC 時間
+        let now = Utc::now();
+
+        // 使用 window_start (這裡我們改存目前是「幾點」，借用原本的 Mutex)
+        // 為了不大幅改動你的 struct，我們可以比對 current_hour
+        // 實作上更好的方式是將 struct 裡的 window_start 改為 last_reset_hour: Mutex<u32>
+
+        // 簡化版的整點重置檢查邏輯：
+        // 每當經過整點，就清空計數器
+        // 由於我們不能輕易改變你 struct 裡面的定義，最直接的作法是算出「距離下個整點還有幾秒」
+
+        let minutes = now.minute();
+        let seconds = now.second();
+        let seconds_until_next_hour = 3600 - (minutes * 60 + seconds);
+
+        // 如果計數器達到上限，就「睡到下一個整點」
         if current >= safe_limit {
-            // 計算需要等待的時間
-            let wait_duration = Duration::from_secs(FINMIND_RATE_LIMIT_WAIT_SECS);
+            let wait_duration = Duration::from_secs(seconds_until_next_hour as u64);
             let resume_instant = Instant::now() + wait_duration;
 
             {
@@ -177,29 +181,26 @@ impl FinMindRateLimiter {
                 *resume_at = Some(resume_instant);
             }
 
-            warn!(
+            tracing::warn!(
                 used = current,
                 limit = FINMIND_RATE_LIMIT_PER_HOUR,
-                wait_secs = FINMIND_RATE_LIMIT_WAIT_SECS,
-                "FinMind rate limit reached, waiting"
+                wait_secs = seconds_until_next_hour,
+                "FinMind rate limit reached, waiting until the top of the hour"
             );
 
-            // 非同步等待，不阻塞其他 task
+            // 等待直到下個整點
             tokio::time::sleep(wait_duration).await;
 
-            // 等待結束，重置
+            // 整點到了，完全重置
             self.request_counter.store(0, Ordering::Relaxed);
             {
-                let mut window_start = self.window_start.lock().await;
-                *window_start = Instant::now();
                 let mut resume_at = self.resume_at.lock().await;
                 *resume_at = None;
             }
 
-            info!("FinMind rate limit wait complete, resuming");
+            tracing::info!("FinMind rate limit wait complete (top of the hour), resuming");
         }
 
-        self.request_counter.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 

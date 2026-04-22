@@ -7,10 +7,10 @@
  */
 import { useState, useEffect } from 'react'
 import { clsx } from 'clsx'
-import type { RateLimitInfo, SymbolProgress } from '@/types/api.generated'
+import type { RateLimitInfo, SymbolProgress } from '@/src/types/api.generated'
 
 interface SyncProgressProps {
-  progress:  SymbolProgress[]
+  progress: SymbolProgress[]
   rateLimit: RateLimitInfo
 }
 
@@ -44,7 +44,7 @@ export function SyncProgress({ progress, rateLimit }: SyncProgressProps) {
               <span className={clsx(
                 'font-mono',
                 usedPct >= 90 ? 'text-red-400' :
-                usedPct >= 70 ? 'text-amber-400' : 'text-slate-300',
+                  usedPct >= 70 ? 'text-amber-400' : 'text-slate-300',
               )}>
                 {rateLimit.used_this_hour} / {rateLimit.limit_per_hour} 次
               </span>
@@ -54,7 +54,7 @@ export function SyncProgress({ progress, rateLimit }: SyncProgressProps) {
                 className={clsx(
                   'h-full rounded-full transition-all duration-500',
                   usedPct >= 90 ? 'bg-red-500' :
-                  usedPct >= 70 ? 'bg-amber-500' : 'bg-brand-500',
+                    usedPct >= 70 ? 'bg-amber-500' : 'bg-brand-500',
                 )}
                 style={{ width: `${Math.min(usedPct, 100)}%` }}
               />
@@ -146,9 +146,9 @@ function SymbolProgressRow({ progress }: { progress: SymbolProgress }) {
   )
 }
 
-function GapProgressBar({ label, gap }: { label: string; gap: import('@/types/api.generated').GapProgress }) {
+function GapProgressBar({ label, gap }: { label: string; gap: import('@/src/types/api.generated').GapProgress }) {
   const from = new Date(gap.from_ms).toLocaleDateString('zh-TW')
-  const to   = new Date(gap.to_ms).toLocaleDateString('zh-TW')
+  const to = new Date(gap.to_ms).toLocaleDateString('zh-TW')
 
   if (gap.completed) {
     return (
@@ -173,13 +173,13 @@ function GapProgressBar({ label, gap }: { label: string; gap: import('@/types/ap
   )
 }
 
-function StatusPill({ status }: { status: import('@/types/api.generated').SymbolSyncStatus }) {
+function StatusPill({ status }: { status: import('@/src/types/api.generated').SymbolSyncStatus }) {
   const config = {
-    pending:   { label: '等待中', className: 'bg-slate-500/15 text-slate-400' },
-    running:   { label: '執行中', className: 'bg-brand-500/15 text-brand-300' },
-    completed: { label: '完成',   className: 'bg-emerald-500/15 text-emerald-400' },
-    failed:    { label: '失敗',   className: 'bg-red-500/15 text-red-400' },
-    skipped:   { label: '跳過',   className: 'bg-slate-500/15 text-slate-500' },
+    pending: { label: '等待中', className: 'bg-slate-500/15 text-slate-400' },
+    running: { label: '執行中', className: 'bg-brand-500/15 text-brand-300' },
+    completed: { label: '完成', className: 'bg-emerald-500/15 text-emerald-400' },
+    failed: { label: '失敗', className: 'bg-red-500/15 text-red-400' },
+    skipped: { label: '跳過', className: 'bg-slate-500/15 text-slate-500' },
   }[status]
 
   return (
