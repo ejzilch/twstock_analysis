@@ -13,7 +13,7 @@
  *   - status 為 completed / failed 時自動停止輪詢
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiClient } from '@/src/lib/api-client'
+import { apiClient, ApiErrorException } from '@/src/lib/api-client'
 import { generateRequestId } from '@/src/lib/utils'
 import { useAppStore } from '@/src/store/useAppStore'
 import type {
@@ -25,6 +25,16 @@ import type {
 
 // 輪詢間隔：10 秒
 const SYNC_POLL_INTERVAL_MS = 10_000
+const API_V1_PREFIX = '/api/v1'
+
+function buildAdminSyncPath(path: string): string {
+  const base = (process.env.NEXT_PUBLIC_API_BASE_URL ?? '').replace(/\/+$/, '')
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+
+  // 若 base 已包含 /api/v1，就不要再重複加前綴
+  const prefix = base.endsWith(API_V1_PREFIX) ? '' : API_V1_PREFIX
+  return `${prefix}${normalizedPath}`
+}
 
 /** status 是否仍在進行中（需要繼續輪詢） */
 function isInProgress(status: SyncStatus): boolean {
@@ -40,14 +50,24 @@ export function useTriggerSync() {
   return useMutation<
     ManualSyncAcceptedResponse,
     Error,
-    { symbols: string[] }
+    {
+      symbols: string[]
+      fullSync: boolean
+      fromDate?: string
+      toDate?: string
+      intervals?: string[]
+    }
   >({
-    mutationFn: ({ symbols }) =>
-      apiClient<ManualSyncAcceptedResponse>('/api/v1/admin/sync', {
+    mutationFn: ({ symbols, fullSync, fromDate, toDate, intervals }) =>
+      apiClient<ManualSyncAcceptedResponse>(buildAdminSyncPath('/admin/sync'), {
         method: 'POST',
         body: JSON.stringify({
           request_id: generateRequestId(),
           symbols,
+          full_sync: fullSync,
+          from_date: fullSync ? undefined : fromDate,
+          to_date: fullSync ? undefined : toDate,
+          intervals: fullSync ? undefined : intervals,
         } satisfies ManualSyncRequest),
       }),
 
@@ -55,7 +75,7 @@ export function useTriggerSync() {
       // 將 sync_id 存入 store，供 useSyncStatus 開始輪詢
       setActiveSyncId(data.sync_id)
       // 預填快取，避免第一次輪詢前出現 loading 狀態
-      queryClient.setQueryData(['sync-status'], {
+      queryClient.setQueryData(['sync-status', data.sync_id], {
         sync_id: data.sync_id,
         status: data.status,
         started_at_ms: data.started_at_ms,
@@ -84,6 +104,21 @@ export function useTriggerSync() {
   })
 }
 
+export function useCancelSync() {
+  const setActiveSyncId = useAppStore((s) => s.setActiveSyncId)
+
+  return useMutation<void, Error, { syncId: string }>({
+    mutationFn: async ({ syncId }) => {
+      await apiClient(buildAdminSyncPath(`/admin/sync/cancel/${syncId}`), {
+        method: 'POST',
+      })
+    },
+    onSuccess: () => {
+      setActiveSyncId(null)
+    },
+  })
+}
+
 // ── useSyncStatus ─────────────────────────────────────────────────────────────
 
 export function useSyncStatus() {
@@ -91,13 +126,20 @@ export function useSyncStatus() {
   const setActiveSyncId = useAppStore((s) => s.setActiveSyncId)
 
   const query = useQuery<SyncStatusResponse>({
-    queryKey: ['sync-status'],
+    queryKey: ['sync-status', syncId],
     queryFn: async () => {
+      if (!syncId) {
+        throw new Error('Missing sync id')
+      }
       try {
-        return await apiClient<SyncStatusResponse>('/api/v1/admin/sync/status')
+        return await apiClient<SyncStatusResponse>(
+          buildAdminSyncPath(`/admin/sync/status/${syncId}`),
+        )
       } catch (error) {
-        // API 404 代表 sync 不存在，清除殘留 syncId
-        setActiveSyncId(null)
+        // 只有真正查無此 sync_id 時才清空；避免短暫錯誤中斷追蹤
+        if (error instanceof ApiErrorException && error.httpStatus === 404) {
+          setActiveSyncId(null)
+        }
         throw error
       }
     },
@@ -118,10 +160,6 @@ export function useSyncStatus() {
     throwOnError: false,
     retry: false,
   })
-
-  if (query.isError && syncId !== null) {
-    setActiveSyncId(null)
-  }
 
   // 當 status 變為 completed / failed，清除 activeSyncId
   // 讓下次按「再次同步」時可以重新開始

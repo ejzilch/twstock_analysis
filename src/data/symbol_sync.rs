@@ -117,7 +117,7 @@ pub async fn get_finmind_earliest_ms(
 ) -> Result<Option<i64>, BridgeError> {
     let row = sqlx::query!(
         r#"
-        SELECT finmind_earliest_ms
+        SELECT COALESCE(finmind_earliest_ms, earliest_ms) AS finmind_earliest_ms
         FROM symbols
         WHERE symbol = $1
         "#,

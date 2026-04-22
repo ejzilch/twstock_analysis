@@ -16,6 +16,7 @@ interface SymbolSearchInputProps {
   allSymbols: SymbolItem[]
   selectedSymbols: string[]
   onSelect: (symbol: SymbolItem) => void
+  onManualSelect?: (symbolCode: string) => void
   disabled?: boolean
   isLoading?: boolean
   isError?: boolean
@@ -27,6 +28,7 @@ export function SymbolSearchInput({
   allSymbols,
   selectedSymbols,
   onSelect,
+  onManualSelect,
   disabled = false,
   isLoading = false,
   isError = false,
@@ -70,16 +72,24 @@ export function SymbolSearchInput({
     setIsOpen(value.trim().length > 0)
   }
 
+  function handleManualSubmit() {
+    const code = query.trim()
+    if (!code || !onManualSelect || selectedSymbols.includes(code)) return
+    onManualSelect(code)
+    setQuery('')
+    setIsOpen(false)
+  }
+
   // 決定 placeholder 文字
   const placeholder = isLoading
     ? '股票清單載入中...'
     : isError
-      ? '股票清單載入失敗，請重新整理'
+      ? '股票清單載入失敗，仍可輸入代號後按 Enter'
       : allSymbols.length === 0
-        ? '尚無股票資料'
+        ? '尚無股票資料，請直接輸入代號'
         : '輸入股票代號或名稱...'
 
-  const isDisabled = disabled || isLoading || isError || allSymbols.length === 0
+  const isDisabled = disabled
 
   return (
     <div ref={containerRef} className="relative">
@@ -103,6 +113,12 @@ export function SymbolSearchInput({
           value={query}
           onChange={(e) => handleInputChange(e.target.value)}
           onFocus={() => query.trim().length > 0 && setIsOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              handleManualSubmit()
+            }
+          }}
           placeholder={placeholder}
           disabled={isDisabled}
           className="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-600 focus:outline-none disabled:cursor-not-allowed"
@@ -167,7 +183,7 @@ export function SymbolSearchInput({
       {/* 無結果提示 */}
       {isOpen && !isDisabled && query.trim().length > 0 && filtered.length === 0 && (
         <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-surface-card border border-surface-border rounded-xl shadow-2xl px-4 py-3 animate-fade-in">
-          <p className="text-sm text-slate-500">找不到「{query}」相關股票</p>
+          <p className="text-sm text-slate-500">找不到「{query}」相關股票，按 Enter 可直接加入代號</p>
         </div>
       )}
     </div>

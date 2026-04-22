@@ -1,7 +1,5 @@
-/// src/api/models/admin_sync.rs
-///
-/// 手動同步 API 的 request / response 資料結構。
-/// 對應 API_CONTRACT.md + MANUAL_SYNC_SPEC.md v1.1 定義。
+use crate::models::enums::Interval;
+
 use serde::{Deserialize, Serialize};
 
 // ── Request ───────────────────────────────────────────────────────────────────
@@ -14,6 +12,15 @@ pub struct ManualSyncRequest {
 
     /// 要同步的股票代號清單，至少 1 檔
     pub symbols: Vec<String>,
+
+    /// 是否全量回補（true: 忽略 from/to）
+    pub full_sync: Option<bool>,
+    /// 自訂起始日期（YYYY-MM-DD）
+    pub from_date: Option<String>,
+    /// 自訂結束日期（YYYY-MM-DD）
+    pub to_date: Option<String>,
+    /// 只同步指定 K 線刻度；空值代表全部
+    pub intervals: Option<Vec<Interval>>,
 }
 
 // ── Response ──────────────────────────────────────────────────────────────────

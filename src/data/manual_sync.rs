@@ -9,17 +9,17 @@
 ///   - 先查 DB 確認缺口，再打 FinMind API，不浪費請求配額
 ///   - 每批請求一個月的資料，控制單次請求大小
 ///   - 排程與手動同步共用 FinMindRateLimiter 實例
+use crate::api::handlers::sync_state::is_sync_cancel_requested;
 use crate::constants::{FINMIND_API_TOKEN_ENV, MANUAL_SYNC_BATCH_DAYS};
 use crate::core::BridgeError;
 use crate::data::db::{sync_log_update_counts, sync_log_update_status, BulkInsertBuffer};
 use crate::data::fetch::fetch_range;
 use crate::data::fetch_rate_limiter::{FinMindRateLimiter, SyncProgress};
-
 use crate::data::implementations::{PostgresDbWriter, RedisInvalidator};
 use crate::data::models::current_timestamp_ms;
 use crate::data::symbol_sync::get_finmind_earliest_ms;
 use crate::models::enums::Interval;
-use chrono::{Datelike, Duration, NaiveDate, Utc};
+use chrono::{Duration, NaiveDate, Utc};
 use redis::aio::MultiplexedConnection;
 use reqwest::Client;
 use sqlx::PgPool;
@@ -36,6 +36,14 @@ const ALL_INTERVALS: &[Interval] = &[
     Interval::FourHours,
     Interval::OneDay,
 ];
+
+#[derive(Debug, Clone)]
+pub struct SyncScope {
+    pub full_sync: bool,
+    pub from_date: Option<NaiveDate>,
+    pub to_date: Option<NaiveDate>,
+    pub intervals: Vec<Interval>,
+}
 
 // ── 缺口定義 ──────────────────────────────────────────────────────────────────
 
@@ -88,25 +96,37 @@ impl DateRange {
 pub async fn detect_gaps(
     db_pool: &PgPool,
     symbols: &[String],
+    scope: &SyncScope,
 ) -> Result<Vec<GapInfo>, BridgeError> {
     let today = Utc::now().date_naive();
+    let selected_intervals = if scope.intervals.is_empty() {
+        ALL_INTERVALS.to_vec()
+    } else {
+        scope.intervals.clone()
+    };
     let mut gaps = Vec::new();
 
     for symbol in symbols {
         // 查詢 FinMind 最早可提供日期
         let finmind_earliest_ms = get_finmind_earliest_ms(db_pool, symbol).await?;
 
-        let finmind_earliest = match finmind_earliest_ms {
-            Some(ms) => ms_to_naive_date(ms),
-            None => {
-                warn!(symbol = %symbol, "finmind_earliest_ms is NULL, skipping gap detection");
-                continue;
-            }
-        };
+        let finmind_earliest = finmind_earliest_ms
+            .map(ms_to_naive_date)
+            .unwrap_or_else(|| {
+                // symbols metadata 不完整時，使用保守預設值，避免「誤判無須同步」
+                let fallback = today - Duration::days(365 * 13);
+                warn!(
+                    symbol = %symbol,
+                    fallback_from = %fallback,
+                    "finmind_earliest_ms is NULL, using fallback range for manual sync"
+                );
+                fallback
+            });
 
-        for &interval in ALL_INTERVALS {
+        for interval in &selected_intervals {
             let gap_info =
-                detect_gap_for_interval(db_pool, symbol, interval, finmind_earliest, today).await?;
+                detect_gap_for_interval(db_pool, symbol, *interval, finmind_earliest, today, scope)
+                    .await?;
 
             gaps.push(gap_info);
         }
@@ -122,6 +142,7 @@ async fn detect_gap_for_interval(
     interval: Interval,
     finmind_earliest: NaiveDate,
     today: NaiveDate,
+    scope: &SyncScope,
 ) -> Result<GapInfo, BridgeError> {
     // 查詢 DB 現有資料的頭尾
     let row = sqlx::query!(
@@ -145,6 +166,29 @@ async fn detect_gap_for_interval(
         }
     })?;
 
+    let range_start = if scope.full_sync {
+        finmind_earliest
+    } else {
+        scope
+            .from_date
+            .unwrap_or(finmind_earliest)
+            .max(finmind_earliest)
+    };
+    let range_end = if scope.full_sync {
+        today
+    } else {
+        scope.to_date.unwrap_or(today).min(today)
+    };
+
+    if range_start > range_end {
+        return Ok(GapInfo {
+            symbol: symbol.to_string(),
+            interval,
+            gap_a: None,
+            gap_b: None,
+        });
+    }
+
     let (gap_a, gap_b) = match (row.db_oldest_ms, row.db_newest_ms) {
         // DB 完全無資料 → 全段補
         (None, _) | (_, None) => {
@@ -154,8 +198,8 @@ async fn detect_gap_for_interval(
                 "No data in DB, will fetch full range"
             );
             let gap_a = DateRange {
-                from_date: finmind_earliest,
-                to_date: today,
+                from_date: range_start,
+                to_date: range_end,
             };
             (Some(gap_a), None)
         }
@@ -165,11 +209,11 @@ async fn detect_gap_for_interval(
             let db_newest = ms_to_naive_date(newest_ms);
 
             // 缺口 A（歷史段）：FinMind最早 ~ DB最舊 - 1天
-            let gap_a = if finmind_earliest < db_oldest {
-                let to = db_oldest - Duration::days(1);
-                if finmind_earliest <= to {
+            let gap_a = if range_start < db_oldest {
+                let to = (db_oldest - Duration::days(1)).min(range_end);
+                if range_start <= to {
                     Some(DateRange {
-                        from_date: finmind_earliest,
+                        from_date: range_start,
                         to_date: to,
                     })
                 } else {
@@ -180,11 +224,11 @@ async fn detect_gap_for_interval(
             };
 
             // 缺口 B（近期段）：DB最新 + 1天 ~ 今天
-            let gap_b = if db_newest < today {
-                let from = db_newest + Duration::days(1);
+            let gap_b = if db_newest < range_end {
+                let from = (db_newest + Duration::days(1)).max(range_start);
                 Some(DateRange {
                     from_date: from,
-                    to_date: today,
+                    to_date: range_end,
                 })
             } else {
                 None // 近期段已是今天
@@ -243,6 +287,14 @@ pub async fn fetch_and_insert_gap(
     let mut invalidator = RedisInvalidator::new(redis.clone());
 
     for (i, batch) in batches.iter().enumerate() {
+        if is_sync_cancel_requested(redis, sync_id)
+            .await
+            .unwrap_or(false)
+        {
+            warn!(sync_id = %sync_id, symbol = %gap_info.symbol, "Sync cancel requested, stopping");
+            return Err(BridgeError::internal("SYNC_CANCELLED"));
+        }
+
         // 記錄進度（rate limit 等待後從此繼續）
         rate_limiter
             .record_progress(SyncProgress {
@@ -269,6 +321,7 @@ pub async fn fetch_and_insert_gap(
         .await
         {
             Ok(candles) => {
+                rate_limiter.mark_request_used();
                 let fetched = candles.len() as i32;
 
                 for candle in candles {
@@ -344,6 +397,7 @@ pub async fn run_manual_sync(
     rate_limiter: Arc<FinMindRateLimiter>,
     sync_id: String,
     symbols: Vec<String>,
+    scope: SyncScope,
 ) {
     info!(sync_id = %sync_id, symbols = ?symbols, "Manual sync started");
 
@@ -372,7 +426,7 @@ pub async fn run_manual_sync(
     };
 
     // Step 1: 偵測所有缺口
-    let gaps = match detect_gaps(&db_pool, &symbols).await {
+    let gaps = match detect_gaps(&db_pool, &symbols, &scope).await {
         Ok(g) => g,
         Err(e) => {
             error!(error = %e, sync_id = %sync_id, "detect_gaps failed");
@@ -457,6 +511,7 @@ fn ms_to_naive_date(ms: i64) -> NaiveDate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Datelike;
 
     #[test]
     fn test_date_range_monthly_batches_single_month() {
