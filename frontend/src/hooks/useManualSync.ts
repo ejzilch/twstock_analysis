@@ -92,7 +92,15 @@ export function useSyncStatus() {
 
   const query = useQuery<SyncStatusResponse>({
     queryKey: ['sync-status'],
-    queryFn: () => apiClient<SyncStatusResponse>('/api/v1/admin/sync/status'),
+    queryFn: async () => {
+      try {
+        return await apiClient<SyncStatusResponse>('/api/v1/admin/sync/status')
+      } catch (error) {
+        // API 404 代表 sync 不存在，清除殘留 syncId
+        setActiveSyncId(null)
+        throw error
+      }
+    },
 
     // 只在 syncId 存在時啟動
     enabled: syncId !== null,
@@ -106,7 +114,14 @@ export function useSyncStatus() {
 
     refetchIntervalInBackground: false,
     staleTime: 0,  // 同步狀態永遠視為過期，確保每次輪詢都更新
+
+    throwOnError: false,
+    retry: false,
   })
+
+  if (query.isError && syncId !== null) {
+    setActiveSyncId(null)
+  }
 
   // 當 status 變為 completed / failed，清除 activeSyncId
   // 讓下次按「再次同步」時可以重新開始
@@ -115,6 +130,7 @@ export function useSyncStatus() {
     // 延遲清除，確保最終狀態能被元件讀取到
     setTimeout(() => setActiveSyncId(null), 3000)
   }
+
 
   return query
 }
