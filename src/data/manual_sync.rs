@@ -265,8 +265,11 @@ pub async fn fetch_and_insert_gap(
     let batches = gap.clone().into_monthly_batches();
     let total_batches = batches.len();
     let mut total_inserted = 0i32;
-    let mut total_skipped = 0i32;
     let mut total_failed = 0i32;
+
+    // 紀錄這個缺口開始前，Buffer 內的狀態基準線
+    let initial_inserted = buffer.total_inserted;
+    let initial_skipped = buffer.total_skipped;
 
     info!(
         sync_id    = %sync_id,
@@ -333,23 +336,12 @@ pub async fn fetch_and_insert_gap(
                         })?;
                 }
 
-                // INSERT ON CONFLICT DO NOTHING — 無法直接得知跳過數
-                // 以 fetched 為近似值（實際跳過數由 DB 決定）
-                total_inserted += fetched;
-
-                // 定期更新 sync_log（每 10 批更新一次，減少 DB 寫入）
-                if i % 10 == 0 {
-                    sync_log_update_counts(db_pool, sync_id, fetched, 0, 0)
-                        .await
-                        .unwrap_or_else(|e| warn!(error = %e, "sync_log update failed"));
-                }
-
                 info!(
                     sync_id  = %sync_id,
                     symbol   = %gap_info.symbol,
                     batch    = format!("{}/{}", i + 1, total_batches),
                     fetched  = fetched,
-                    "Batch complete"
+                    "Batch fetched and pushed to buffer"
                 );
             }
 
@@ -372,10 +364,21 @@ pub async fn fetch_and_insert_gap(
         }
     }
 
-    // 最終 flush buffer
+    // 最終強制刷出 buffer 內的資料到資料庫
     buffer.flush(&writer, &mut invalidator).await?;
 
-    Ok((total_inserted, total_skipped, total_failed))
+    // 計算這個缺口實際寫入與跳過的精確數字
+    let actual_inserted = buffer.total_inserted - initial_inserted;
+    let actual_skipped = buffer.total_skipped - initial_skipped;
+
+    // 統一在這個缺口任務完成時，更新 sync_log
+    if actual_inserted > 0 || actual_skipped > 0 {
+        sync_log_update_counts(db_pool, sync_id, actual_inserted, actual_skipped, 0)
+            .await
+            .unwrap_or_else(|e| warn!(error = %e, "sync_log update failed"));
+    }
+
+    Ok((actual_inserted, actual_skipped, total_failed))
 }
 
 // ── run_manual_sync（對外入口）────────────────────────────────────────────────
@@ -432,6 +435,9 @@ pub async fn run_manual_sync(
         }
     };
 
+    let mut has_gap_error = false;
+    let mut total_failed_batches = 0i32;
+
     // Step 2: 對每個缺口執行補資料
     for gap_info in &gaps {
         // 處理缺口 A（歷史段）
@@ -448,13 +454,19 @@ pub async fn run_manual_sync(
             )
             .await;
 
-            if let Err(e) = result {
-                error!(
-                    error   = %e,
-                    sync_id = %sync_id,
-                    symbol  = %gap_info.symbol,
-                    "Gap A fetch failed"
-                );
+            match result {
+                Ok((_, _, failed)) => {
+                    total_failed_batches += failed;
+                }
+                Err(e) => {
+                    has_gap_error = true;
+                    error!(
+                        error   = %e,
+                        sync_id = %sync_id,
+                        symbol  = %gap_info.symbol,
+                        "Gap A fetch failed"
+                    );
+                }
             }
         }
 
@@ -472,23 +484,38 @@ pub async fn run_manual_sync(
             )
             .await;
 
-            if let Err(e) = result {
-                error!(
-                    error   = %e,
-                    sync_id = %sync_id,
-                    symbol  = %gap_info.symbol,
-                    "Gap B fetch failed"
-                );
+            match result {
+                Ok((_, _, failed)) => {
+                    total_failed_batches += failed;
+                }
+                Err(e) => {
+                    has_gap_error = true;
+                    error!(
+                        error   = %e,
+                        sync_id = %sync_id,
+                        symbol  = %gap_info.symbol,
+                        "Gap B fetch failed"
+                    );
+                }
             }
         }
     }
 
-    // Step 3: 標記完成
+    // Step 3: 依執行結果標記最終狀態
     let completed_at = current_timestamp_ms();
-    let _ = sync_log_update_status(&db_pool, &sync_id, "completed", Some(completed_at)).await;
+
+    let final_status = if has_gap_error || total_failed_batches > 0 {
+        "failed"
+    } else {
+        "completed"
+    };
+
+    let _ = sync_log_update_status(&db_pool, &sync_id, final_status, Some(completed_at)).await;
 
     info!(
         sync_id      = %sync_id,
+        final_status = %final_status,
+        failed       = total_failed_batches,
         completed_at = completed_at,
         "Manual sync completed"
     );

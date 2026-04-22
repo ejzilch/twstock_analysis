@@ -181,11 +181,12 @@ export function useSyncStatus() {
   // 當 status 變為 completed / failed，清除 activeSyncId
   // 讓下次按「再次同步」時可以重新開始
   const status = query.data?.status
+  /*
   if (status && !isInProgress(status) && syncId !== null) {
     // 延遲清除，確保最終狀態能被元件讀取到
     setTimeout(() => setActiveSyncId(null), 3000)
   }
-
+  */
 
   return query
 }

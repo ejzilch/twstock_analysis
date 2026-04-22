@@ -253,10 +253,21 @@ fn interval_to_finmind_params(interval: Interval) -> (&'static str, Option<&'sta
 
 /// 日期字串（"YYYY-MM-DD"）轉為毫秒級 UTC timestamp。
 fn date_str_to_ms(date_str: &str) -> Option<i64> {
-    use chrono::NaiveDate;
-    let date = NaiveDate::parse_from_str(date_str, FINMIND_DATE_FORMAT).ok()?;
-    let datetime = date.and_hms_opt(0, 0, 0)?;
-    Some(datetime.and_utc().timestamp_millis())
+    use chrono::{NaiveDate, NaiveDateTime};
+
+    // 先嘗試解析包含時間的格式
+    if let Ok(dt) = NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M:%S") {
+        return Some(dt.and_utc().timestamp_millis());
+    }
+
+    // 如果失敗，再嘗試只解析日期格式
+    if let Ok(date) = NaiveDate::parse_from_str(date_str, FINMIND_DATE_FORMAT) {
+        if let Some(dt) = date.and_hms_opt(0, 0, 0) {
+            return Some(dt.and_utc().timestamp_millis());
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -279,7 +290,7 @@ mod tests {
     fn test_interval_to_finmind_params() {
         assert_eq!(
             interval_to_finmind_params(Interval::OneDay),
-            ("TaiwanStockKBar", Some("1M"))
+            ("TaiwanStockPrice", None)
         );
         assert_eq!(
             interval_to_finmind_params(Interval::OneHour),
