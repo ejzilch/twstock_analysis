@@ -1,50 +1,50 @@
 'use client'
 /**
- * src/components/settings/SymbolSearchInput.tsx
+ * src/components/settings/SymbolSearchInput.tsx（修正版）
  *
- * 股票搜尋輸入框 + 下拉候選清單。
- *
- * 規則：
- *   - 資料來自 useSymbols()（已有 hook），不另打 API
- *   - 前端本地過濾，無額外請求
- *   - 下拉最多顯示 10 筆
- *   - 已選股票顯示打勾，點擊無效果
+ * 修正：
+ *   - 不再自行呼叫 useSymbols()，改由父層（ManualSyncPanel）傳入 allSymbols
+ *   - 避免雙重 fetch 與快取不同步問題
+ *   - 加入 loading / error 狀態顯示
  */
 import { useState, useRef, useEffect } from 'react'
 import { clsx } from 'clsx'
-import { useSymbols } from '@/src/hooks'
 import type { SymbolItem } from '@/src/types/api.generated'
 
 interface SymbolSearchInputProps {
+  /** 父層傳入的完整股票清單（來自 useSymbols）*/
+  allSymbols: SymbolItem[]
   selectedSymbols: string[]
-  onSelect:        (symbol: SymbolItem) => void
-  disabled?:       boolean
+  onSelect: (symbol: SymbolItem) => void
+  disabled?: boolean
+  isLoading?: boolean
+  isError?: boolean
 }
 
 const MAX_DROPDOWN_ITEMS = 10
 
 export function SymbolSearchInput({
+  allSymbols,
   selectedSymbols,
   onSelect,
   disabled = false,
+  isLoading = false,
+  isError = false,
 }: SymbolSearchInputProps) {
-  const [query,     setQuery]     = useState('')
-  const [isOpen,    setIsOpen]    = useState(false)
+  const [query, setQuery] = useState('')
+  const [isOpen, setIsOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
-  const inputRef     = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  const { data: symbolsData } = useSymbols()
-  const allSymbols = symbolsData?.symbols ?? []
-
-  // 本地過濾
+  // 本地過濾（直接用父層傳入的 allSymbols）
   const filtered = query.trim().length === 0
     ? []
     : allSymbols
-        .filter((s) =>
-          s.symbol.includes(query.trim()) ||
-          s.name.includes(query.trim())
-        )
-        .slice(0, MAX_DROPDOWN_ITEMS)
+      .filter((s) =>
+        s.symbol.includes(query.trim()) ||
+        s.name.includes(query.trim())
+      )
+      .slice(0, MAX_DROPDOWN_ITEMS)
 
   // 點擊外部關閉下拉
   useEffect(() => {
@@ -70,27 +70,45 @@ export function SymbolSearchInput({
     setIsOpen(value.trim().length > 0)
   }
 
+  // 決定 placeholder 文字
+  const placeholder = isLoading
+    ? '股票清單載入中...'
+    : isError
+      ? '股票清單載入失敗，請重新整理'
+      : allSymbols.length === 0
+        ? '尚無股票資料'
+        : '輸入股票代號或名稱...'
+
+  const isDisabled = disabled || isLoading || isError || allSymbols.length === 0
+
   return (
     <div ref={containerRef} className="relative">
       <div className={clsx(
         'flex items-center gap-2 bg-surface border rounded-lg px-3 py-2 transition-all',
-        isOpen
+        isOpen && !isDisabled
           ? 'border-brand-500/50 ring-2 ring-brand-500/20'
           : 'border-surface-border',
-        disabled && 'opacity-50 cursor-not-allowed',
+        isDisabled && 'opacity-50 cursor-not-allowed',
       )}>
-        <span className="text-slate-500 text-sm shrink-0">🔍</span>
+        {/* 載入中 spinner / 搜尋 icon */}
+        {isLoading ? (
+          <span className="w-4 h-4 border-2 border-slate-600 border-t-slate-400 rounded-full animate-spin shrink-0" />
+        ) : (
+          <span className="text-slate-500 text-sm shrink-0">🔍</span>
+        )}
+
         <input
           ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => handleInputChange(e.target.value)}
           onFocus={() => query.trim().length > 0 && setIsOpen(true)}
-          placeholder="輸入股票代號或名稱..."
-          disabled={disabled}
-          className="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-600 focus:outline-none"
+          placeholder={placeholder}
+          disabled={isDisabled}
+          className="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-600 focus:outline-none disabled:cursor-not-allowed"
         />
-        {query.length > 0 && (
+
+        {query.length > 0 && !isDisabled && (
           <button
             onClick={() => { setQuery(''); setIsOpen(false) }}
             className="text-slate-600 hover:text-slate-400 text-lg leading-none shrink-0"
@@ -101,7 +119,7 @@ export function SymbolSearchInput({
       </div>
 
       {/* 下拉候選清單 */}
-      {isOpen && filtered.length > 0 && (
+      {isOpen && !isDisabled && filtered.length > 0 && (
         <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-surface-card border border-surface-border rounded-xl shadow-2xl overflow-hidden animate-fade-in">
           {filtered.map((symbol) => {
             const isSelected = selectedSymbols.includes(symbol.symbol)
@@ -147,7 +165,7 @@ export function SymbolSearchInput({
       )}
 
       {/* 無結果提示 */}
-      {isOpen && query.trim().length > 0 && filtered.length === 0 && (
+      {isOpen && !isDisabled && query.trim().length > 0 && filtered.length === 0 && (
         <div className="absolute top-full left-0 right-0 mt-1 z-50 bg-surface-card border border-surface-border rounded-xl shadow-2xl px-4 py-3 animate-fade-in">
           <p className="text-sm text-slate-500">找不到「{query}」相關股票</p>
         </div>
