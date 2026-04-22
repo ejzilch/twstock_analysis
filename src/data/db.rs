@@ -29,6 +29,8 @@ use tracing::info;
 pub struct BulkInsertBuffer {
     buffer: Vec<RawCandle>,
     last_flush_at: Instant,
+    pub total_inserted: i32,
+    pub total_skipped: i32,
 }
 
 impl BulkInsertBuffer {
@@ -36,6 +38,8 @@ impl BulkInsertBuffer {
         Self {
             buffer: Vec::with_capacity(BULK_INSERT_MAX_BATCH_SIZE),
             last_flush_at: Instant::now(),
+            total_inserted: 0,
+            total_skipped: 0,
         }
     }
 
@@ -76,6 +80,10 @@ impl BulkInsertBuffer {
         // Step 1 & 2：寫入 DB + COMMIT（由 DbWriter 實作負責）
         let written = writer.write_batch(&batch).await?;
 
+        // 紀錄實際寫入與跳過（總數 - 成功寫入 = 跳過）的數量
+        self.total_inserted += written as i32;
+        self.total_skipped += (batch.len() - written) as i32;
+
         // Step 3：快取失效（COMMIT 之後才執行）
         invalidator.invalidate(&affected_symbols);
 
@@ -84,6 +92,7 @@ impl BulkInsertBuffer {
         info!(
             total   = batch.len(),
             written,
+            skipped = batch.len() - written,
             symbols = ?affected_symbols,
             "Buffer flushed"
         );

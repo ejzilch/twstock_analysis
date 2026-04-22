@@ -6,30 +6,30 @@
  * 純 props，無任何 API 或 store 依賴。
  */
 import { clsx } from 'clsx'
-import type { SymbolProgress, SyncSummary } from '@/types/api.generated'
+import type { SymbolProgress, SyncSummary } from '@/src/types/api.generated'
 
 interface SyncResultProps {
-  progress:  SymbolProgress[]
-  summary:   SyncSummary
-  onReset:   () => void
+  progress: SymbolProgress[]
+  summary: SyncSummary
+  onReset: () => void
 }
 
 export function SyncResult({ progress, summary, onReset }: SyncResultProps) {
   const hasFailures = summary.total_failed > 0
-  const allSkipped  = summary.total_inserted === 0 && summary.total_failed === 0
+  const allSkipped = summary.total_inserted === 0 && summary.total_failed === 0
 
   return (
     <div className={clsx(
       'border rounded-xl overflow-hidden',
-      hasFailures  ? 'border-red-500/30'     :
-      allSkipped   ? 'border-slate-500/30'   : 'border-emerald-500/30',
+      hasFailures ? 'border-red-500/30' :
+        allSkipped ? 'border-slate-500/30' : 'border-emerald-500/30',
     )}>
       {/* Header */}
       <div className={clsx(
         'flex items-center justify-between px-4 py-3 border-b',
-        hasFailures  ? 'bg-red-500/5 border-red-500/20'         :
-        allSkipped   ? 'bg-slate-500/5 border-slate-500/20'     :
-                       'bg-emerald-500/5 border-emerald-500/20',
+        hasFailures ? 'bg-red-500/5 border-red-500/20' :
+          allSkipped ? 'bg-slate-500/5 border-slate-500/20' :
+            'bg-emerald-500/5 border-emerald-500/20',
       )}>
         <div className="flex items-center gap-2">
           <span className="text-base">
@@ -82,7 +82,7 @@ export function SyncResult({ progress, summary, onReset }: SyncResultProps) {
             onClick={onReset}
             className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
           >
-            再次同步
+            完成並返回
           </button>
         </div>
       </div>
@@ -97,12 +97,12 @@ function SymbolResultRow({ progress }: { progress: SymbolProgress }) {
     ? `${progress.symbol} ${progress.name}`
     : progress.symbol
 
-  const gapADone   = progress.gap_a?.completed
-  const gapBDone   = progress.gap_b?.completed
+  const gapADone = progress.gap_a?.completed
+  const gapBDone = progress.gap_b?.completed
   const gapAInserted = progress.gap_a?.inserted ?? 0
   const gapBInserted = progress.gap_b?.inserted ?? 0
-  const gapASkipped  = progress.gap_a?.skipped ?? 0
-  const gapBSkipped  = progress.gap_b?.skipped ?? 0
+  const gapASkipped = progress.gap_a?.skipped ?? 0
+  const gapBSkipped = progress.gap_b?.skipped ?? 0
 
   return (
     <div className="py-3 flex flex-col gap-1.5">
