@@ -44,7 +44,7 @@ thiserror = "1.0"
 
 # ── 日誌 ──────────────────────────────────────────────────────────────────────
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "chrono", "json", "local-time"] }
 
 # ── 環境變數 ──────────────────────────────────────────────────────────────────
 dotenvy = "0.15"
@@ -53,6 +53,7 @@ dotenvy = "0.15"
 strum = { version = "0.28", features = ["derive"] }
 
 async-trait = "0.1.89"
+time = { version = "0.3.47", features = ["macros", "formatting", "local-offset"] }
 
 [dev-dependencies]
 # 整合測試用的非同步測試 macro

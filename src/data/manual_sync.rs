@@ -28,14 +28,7 @@ use tracing::{error, info, warn};
 
 // ── 所有支援的 K 線粒度（手動同步全部補齊）────────────────────────────────────
 
-const ALL_INTERVALS: &[Interval] = &[
-    Interval::OneMin,
-    Interval::FiveMin,
-    Interval::FifteenMin,
-    Interval::OneHour,
-    Interval::FourHours,
-    Interval::OneDay,
-];
+const ALL_INTERVALS: &[Interval] = &[Interval::OneDay];
 
 #[derive(Debug, Clone)]
 pub struct SyncScope {
@@ -179,6 +172,8 @@ async fn detect_gap_for_interval(
     } else {
         scope.to_date.unwrap_or(today).min(today)
     };
+
+    tracing::info!(range_start = %range_start, range_end = %range_end, "Check Gap");
 
     if range_start > range_end {
         return Ok(GapInfo {

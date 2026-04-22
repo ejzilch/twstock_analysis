@@ -16,6 +16,7 @@ import { useCancelSync, useTriggerSync, useSyncStatus } from '@/src/hooks/useMan
 import { useAppStore } from '@/src/store/useAppStore'
 import { Card, Button, ErrorToast } from '@/src/components/ui'
 import { SymbolSearchInput } from './SymbolSearchInput'
+import { ApiErrorException } from '@/src/lib/api-client'
 import { SelectedSymbolTags } from './SelectedSymbolTags'
 import { SyncProgress } from './SyncProgress'
 import { SyncResult } from './SyncResult'
@@ -58,6 +59,10 @@ export function ManualSyncPanel() {
   const isRunning = currentStatus === 'running' || currentStatus === 'rate_limit_waiting'
   const isCompleted = currentStatus === 'completed' || currentStatus === 'failed'
   const isIdle = !isRunning && !isCompleted
+  const isSyncConflictError =
+    triggerSync.error instanceof ApiErrorException &&
+    triggerSync.error.httpStatus === 409 &&
+    triggerSync.error.errorCode === 'SYNC_ALREADY_RUNNING'
 
   // ── 股票選擇操作 ─────────────────────────────────────────────────────────────
 
@@ -291,7 +296,7 @@ export function ManualSyncPanel() {
       )}
 
       {/* trigger sync 錯誤提示 */}
-      {triggerSync.isError && (
+      {triggerSync.isError && !isSyncConflictError && (
         <ErrorToast
           error={triggerSync.error}
           onRetry={handleStartSync}

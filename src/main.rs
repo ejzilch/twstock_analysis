@@ -5,7 +5,6 @@ mod constants;
 mod core;
 mod data;
 mod models;
-
 use crate::ai_client::AiServiceClient;
 use crate::api::build_router;
 use crate::api::middleware::rate_limit::new_rate_limiter_state;
@@ -16,8 +15,10 @@ use crate::data::{
 };
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
+use tracing_subscriber::{
+    fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
+};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 載入 .env 檔案
@@ -135,18 +136,23 @@ async fn main() -> anyhow::Result<()> {
 /// APP_ENV=development（預設）: 人類可讀格式，適合本機開發
 fn init_tracing() {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-
     let app_env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string());
+
+    // 設定時間格式為本地時間 (例如：2026-04-22 17:37:42)
+    // 格式定義字串：[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]
+    let timer = fmt::time::LocalTime::new(time::macros::format_description!(
+        "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]"
+    ));
 
     if app_env == "production" {
         tracing_subscriber::registry()
             .with(env_filter)
-            .with(fmt::layer().json())
+            .with(fmt::layer().json().with_timer(timer))
             .init();
     } else {
         tracing_subscriber::registry()
             .with(env_filter)
-            .with(fmt::layer().pretty())
+            .with(fmt::layer().pretty().with_timer(timer))
             .init();
     }
 }

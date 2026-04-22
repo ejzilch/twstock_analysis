@@ -32,11 +32,21 @@ struct FinMindResponse {
 
 #[derive(Debug, Deserialize)]
 struct FinMindCandle {
-    date: Option<String>, // "2026-01-02"
+    date: Option<String>,
+
+    #[serde(alias = "Open", alias = "open")]
     open: Option<f64>,
-    max: Option<f64>, // FinMind 用 max/min，非 high/low
-    min: Option<f64>,
+
+    #[serde(alias = "High", alias = "max")]
+    high: Option<f64>,
+
+    #[serde(alias = "Low", alias = "min")]
+    low: Option<f64>,
+
+    #[serde(alias = "Close", alias = "close")]
     close: Option<f64>,
+
+    #[serde(alias = "Volume", alias = "Trading_Volume")]
     volume: Option<f64>,
 }
 
@@ -84,13 +94,19 @@ pub async fn fetch_range(
     to_date: &str,
     api_token: &str,
 ) -> Result<Vec<RawCandle>, BridgeError> {
-    let dataset = interval_to_finmind_dataset(interval);
+    let (dataset, kline_type) = interval_to_finmind_params(interval);
 
     let base = std::env::var(FINMIND_API_BASE_URL).expect("FINMIND_API_BASE not set");
 
-    let url = format!(
-        "{base}/data?dataset={dataset}&data_id={symbol}&start_date={from_date}&end_date={to_date}&token={api_token}"
-    );
+    let url = if let Some(ktype) = kline_type {
+        format!(
+            "{base}/data?dataset={dataset}&data_id={symbol}&start_date={from_date}&end_date={to_date}&kline_type={ktype}&token={api_token}"
+        )
+    } else {
+        format!(
+            "{base}/data?dataset={dataset}&data_id={symbol}&start_date={from_date}&end_date={to_date}&token={api_token}"
+        )
+    };
 
     info!(
         symbol = %symbol,
@@ -121,12 +137,14 @@ pub async fn fetch_range(
         }
     })?;
 
+    tracing::debug!(body = %&body[..500.min(body.len())], "FinMind raw response");
+
     let finmind_resp: FinMindResponse = serde_json::from_str(&body).map_err(|e| {
         let preview: String = body.chars().take(240).collect();
         error!(
             error = %e,
             symbol = %symbol,
-            body_preview = %preview,
+            body_preview = %&body[..200.min(body.len())],
             "FinMind response deserialization failed"
         );
         BridgeError::FinMindDataSourceError {
@@ -159,8 +177,8 @@ pub async fn fetch_range(
         .filter_map(|row| {
             let date = row.date?;
             let open = row.open?;
-            let high = row.max?;
-            let low = row.min?;
+            let high = row.high?;
+            let low = row.low?;
             let close = row.close?;
             let volume = row.volume?;
 
@@ -220,15 +238,16 @@ where
 
 // ── 內部工具函數 ──────────────────────────────────────────────────────────────
 
-/// Interval → FinMind dataset 名稱對應。
-fn interval_to_finmind_dataset(interval: Interval) -> &'static str {
+/// Interval → FinMind params 名稱對應。
+fn interval_to_finmind_params(interval: Interval) -> (&'static str, Option<&'static str>) {
     match interval {
-        Interval::OneMin => "1m",
-        Interval::FiveMin => "5m",
-        Interval::FifteenMin => "15m",
-        Interval::OneHour => "1h",
-        Interval::FourHours => "4h",
-        Interval::OneDay => "1d",
+        Interval::OneMin => ("TaiwanStockKBar", Some("1M")),
+        Interval::FiveMin => ("TaiwanStockKBar", Some("5M")),
+        Interval::FifteenMin => ("TaiwanStockKBar", Some("15M")),
+        Interval::OneHour => ("TaiwanStockKBar", Some("60M")),
+        Interval::FourHours => ("TaiwanStockKBar", Some("240M")),
+        // 日線不需要 kline_type，且 dataset 為 TaiwanStockPrice
+        Interval::OneDay => ("TaiwanStockPrice", None),
     }
 }
 
@@ -257,14 +276,14 @@ mod tests {
     }
 
     #[test]
-    fn test_interval_to_finmind_dataset() {
+    fn test_interval_to_finmind_params() {
         assert_eq!(
-            interval_to_finmind_dataset(Interval::OneDay),
-            "TaiwanStockPrice"
+            interval_to_finmind_params(Interval::OneDay),
+            ("TaiwanStockKBar", Some("1M"))
         );
         assert_eq!(
-            interval_to_finmind_dataset(Interval::OneHour),
-            "TaiwanStockPriceHour"
+            interval_to_finmind_params(Interval::OneHour),
+            ("TaiwanStockKBar", Some("60M"))
         );
     }
 }
