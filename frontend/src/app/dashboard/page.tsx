@@ -17,21 +17,39 @@ import { ApiErrorException } from '@/src/lib/api-client'
 // ── Time range options ────────────────────────────────────────────────────────
 
 const TIME_RANGES = [
-    { label: '1D', days: 1 },
-    { label: '5D', days: 5 },
-    { label: '1M', days: 30 },
-    { label: '3M', days: 90 },
-    { label: '6M', days: 180 },
+    { label: '1D', value: 1 },
+    { label: '5D', value: 5 },
+    { label: '1M', value: 30 },
+    { label: '3M', value: 90 },
+    { label: '6M', value: 180 },
+    { label: '1Y', value: 365 },
+    { label: '3Y', value: 365 * 3 },
+    { label: 'MAX', value: 'max' as const },
 ]
 
-function useTimeRange() {
-    const [days, setDays] = useState(7)
+const MAX_LOOKBACK_DAYS_BY_INTERVAL: Record<string, number> = {
+    '1m': 1,      // 約 1440 根
+    '5m': 6,      // 約 1728 根
+    '15m': 20,    // 約 1920 根
+    '1h': 79,     // 約 1896 根
+    '4h': 316,    // 約 1896 根
+    '1d': 1900,   // 預留空間，避免超過 2000 根上限
+}
+
+function useTimeRange(interval: string) {
+    const [selectedRange, setSelectedRange] = useState<number | 'max'>(180)
+    const lookbackDays = useMemo(() => {
+        if (selectedRange !== 'max') return selectedRange
+        return MAX_LOOKBACK_DAYS_BY_INTERVAL[interval] ?? 180
+    }, [selectedRange, interval])
+
     const range = useMemo(() => {
         const to = Date.now()
-        const from = to - days * 24 * 60 * 60 * 1000
+        const from = to - lookbackDays * 24 * 60 * 60 * 1000
         return { from_ms: from, to_ms: to }
-    }, [days])
-    return { days, setDays, ...range }
+    }, [lookbackDays])
+
+    return { selectedRange, setSelectedRange, ...range }
 }
 
 // ── Data latency banner ───────────────────────────────────────────────────────
@@ -59,7 +77,7 @@ export default function DashboardPage() {
     const router = useRouter()
     const symbol = useAppStore((s) => s.selectedSymbol)
     const interval = useAppStore((s) => s.selectedInterval)
-    const { days, setDays, from_ms, to_ms } = useTimeRange()
+    const { selectedRange, setSelectedRange, from_ms, to_ms } = useTimeRange(interval)
 
     const candlesQuery = useCandles({
         symbol, interval, from_ms, to_ms,
@@ -70,6 +88,8 @@ export default function DashboardPage() {
     const candles = candlesQuery.data?.candles ?? []
     const signals = signalsQuery.data?.signals ?? []
     const isLoading = candlesQuery.isLoading
+    const hasRsi = candles.some((c: any) => c.indicators?.['rsi'] != null)
+    const hasMacd = candles.some((c: any) => c.indicators?.['macd'] != null)
 
     const showLatencyBanner =
         isDataSourceError(candlesQuery.error) ||
@@ -92,11 +112,11 @@ export default function DashboardPage() {
                     <div className="flex items-center gap-1 bg-surface-card border border-surface-border rounded-lg p-1">
                         {TIME_RANGES.map((r) => (
                             <button
-                                key={r.days}
-                                onClick={() => setDays(r.days)}
+                                key={r.label}
+                                onClick={() => setSelectedRange(r.value)}
                                 className={clsx(
                                     'px-2.5 py-1 rounded-md text-xs font-medium transition-all',
-                                    days === r.days
+                                    selectedRange === r.value
                                         ? 'bg-brand-600 text-white'
                                         : 'text-slate-400 hover:text-slate-200 hover:bg-surface-hover',
                                 )}
@@ -146,13 +166,13 @@ export default function DashboardPage() {
                                 <CandleChart candles={candles} signals={signals} height={500} />
                             </Card>
 
-                            {candles.some((c) => c.indicators['rsi'] != null) && (
+                            {hasRsi && (
                                 <Card padding={false} className="overflow-hidden">
                                     <IndicatorPane candles={candles} type="rsi" />
                                 </Card>
                             )}
 
-                            {candles.some((c) => c.indicators['macd'] != null) && (
+                            {hasMacd && (
                                 <Card padding={false} className="overflow-hidden">
                                     <IndicatorPane candles={candles} type="macd" />
                                 </Card>

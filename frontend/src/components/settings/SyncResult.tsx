@@ -16,30 +16,41 @@ interface SyncResultProps {
 
 export function SyncResult({ progress, summary, onReset }: SyncResultProps) {
   const hasFailures = summary.total_failed > 0
-  const allSkipped = summary.total_inserted === 0 && summary.total_failed === 0
+  const allSkipped = summary.total_inserted === 0 && summary.total_failed === 0 && summary.total_skipped > 0
+  const noDataSynced = summary.total_inserted === 0 && summary.total_failed === 0 && summary.total_skipped === 0
 
   return (
     <div className={clsx(
       'border rounded-xl overflow-hidden',
       hasFailures ? 'border-red-500/30' :
-        allSkipped ? 'border-slate-500/30' : 'border-emerald-500/30',
+        allSkipped ? 'border-slate-500/30' :
+          noDataSynced ? 'border-amber-500/30' : 'border-emerald-500/30',
     )}>
       {/* Header */}
       <div className={clsx(
         'flex items-center justify-between px-4 py-3 border-b',
         hasFailures ? 'bg-red-500/5 border-red-500/20' :
           allSkipped ? 'bg-slate-500/5 border-slate-500/20' :
-            'bg-emerald-500/5 border-emerald-500/20',
+            noDataSynced ? 'bg-amber-500/5 border-amber-500/20' :
+              'bg-emerald-500/5 border-emerald-500/20',
       )}>
         <div className="flex items-center gap-2">
           <span className="text-base">
-            {hasFailures ? '⚠️' : allSkipped ? 'ℹ️' : '✅'}
+            {hasFailures ? '⚠️' : allSkipped ? 'ℹ️' : noDataSynced ? '⚠️' : '✅'}
           </span>
           <span className={clsx(
             'text-sm font-medium',
-            hasFailures ? 'text-red-300' : allSkipped ? 'text-slate-300' : 'text-emerald-300',
+            hasFailures ? 'text-red-300' :
+              allSkipped ? 'text-slate-300' :
+                noDataSynced ? 'text-amber-300' : 'text-emerald-300',
           )}>
-            {hasFailures ? '同步完成（含失敗）' : allSkipped ? '無需補資料' : '同步完成'}
+            {hasFailures
+              ? '同步完成（含失敗）'
+              : allSkipped
+                ? '無需補資料'
+                : noDataSynced
+                  ? '同步完成（未取得資料）'
+                  : '同步完成'}
           </span>
         </div>
       </div>
@@ -77,6 +88,11 @@ export function SyncResult({ progress, summary, onReset }: SyncResultProps) {
                 </span> 筆
               </span>
             )}
+            {noDataSynced && (
+              <span className="text-amber-300">
+                未新增任何資料，請檢查股票代碼、日期區間或 FinMind Token
+              </span>
+            )}
           </div>
           <button
             onClick={onReset}
@@ -86,7 +102,7 @@ export function SyncResult({ progress, summary, onReset }: SyncResultProps) {
           </button>
         </div>
       </div>
-    </div>
+    </div >
   )
 }
 
