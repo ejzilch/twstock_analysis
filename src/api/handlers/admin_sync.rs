@@ -8,16 +8,18 @@
 ///   3. sync_log 操作引用路徑修正
 ///   4. BridgeError variant 對齊現有定義
 ///   5. find_running_sync / save_sync_state / load_sync_state 改為 async
-use std::sync::Arc;
-
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use chrono::NaiveDate;
 use redis::aio::MultiplexedConnection;
 use reqwest::Client;
 use sqlx::PgPool;
+
+use std::sync::Arc;
+
 use tracing::{error, info, warn};
 
 use crate::api::handlers::sync_state::{
-    find_running_sync, load_sync_state, save_sync_state, SyncState,
+    find_running_sync, load_sync_state, request_sync_cancel, save_sync_state, SyncState,
 };
 use crate::api::models::admin_sync::{
     ManualSyncAcceptedResponse, ManualSyncRequest, RateLimitInfo, SyncStatus, SyncStatusResponse,
@@ -31,7 +33,7 @@ use crate::constants::{
 use crate::core::BridgeError;
 use crate::data::db::{sync_log_create, SyncLogEntry};
 use crate::data::fetch_rate_limiter::FinMindRateLimiter;
-use crate::data::manual_sync::run_manual_sync;
+use crate::data::manual_sync::{run_manual_sync, SyncScope};
 use crate::data::models::current_timestamp_ms;
 
 // ── POST /api/v1/admin/sync ───────────────────────────────────────────────────
@@ -54,6 +56,80 @@ pub async fn trigger_manual_sync(
         )
             .into_response();
     }
+
+    let full_sync = body.full_sync.unwrap_or(true);
+    let from_date = if full_sync {
+        None
+    } else {
+        match body
+            .from_date
+            .as_deref()
+            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+        {
+            Some(d) => Some(d),
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error_code": "INVALID_REQUEST",
+                        "message": "from_date is required in custom mode (YYYY-MM-DD)",
+                        "fallback_available": false,
+                        "timestamp_ms": current_timestamp_ms(),
+                        "request_id": body.request_id,
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    let to_date = if full_sync {
+        None
+    } else {
+        match body
+            .to_date
+            .as_deref()
+            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+        {
+            Some(d) => Some(d),
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error_code": "INVALID_REQUEST",
+                        "message": "to_date is required in custom mode (YYYY-MM-DD)",
+                        "fallback_available": false,
+                        "timestamp_ms": current_timestamp_ms(),
+                        "request_id": body.request_id,
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    if let (Some(from), Some(to)) = (from_date, to_date) {
+        if from > to {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error_code": "INVALID_REQUEST",
+                    "message": "from_date must be earlier than or equal to to_date",
+                    "fallback_available": false,
+                    "timestamp_ms": current_timestamp_ms(),
+                    "request_id": body.request_id,
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    let scope = SyncScope {
+        full_sync,
+        from_date,
+        to_date,
+        intervals: body.intervals.clone().unwrap_or_default(),
+    };
 
     // 檢查是否已有同步執行中
     // MultiplexedConnection::clone() 取得獨立連線副本，不需重新連線
@@ -139,6 +215,7 @@ pub async fn trigger_manual_sync(
     let redis_clone = state.redis_client.clone();
     let sync_id_bg = sync_id.clone();
     let symbols_bg = body.symbols.clone();
+    let scope_bg = scope.clone();
 
     tokio::spawn(async move {
         run_manual_sync_with_state_tracking(
@@ -148,6 +225,7 @@ pub async fn trigger_manual_sync(
             redis_clone,
             sync_id_bg,
             symbols_bg,
+            scope_bg,
         )
         .await;
     });
@@ -262,6 +340,39 @@ pub async fn get_sync_status_by_id(
         .into_response()
 }
 
+/// 取消指定 sync 任務（協作式，於下一批次停止）。
+pub async fn cancel_manual_sync(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(sync_id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let mut redis = state.redis_client.clone();
+    match request_sync_cancel(&mut redis, &sync_id).await {
+        Ok(_) => (
+            StatusCode::ACCEPTED,
+            Json(serde_json::json!({
+                "sync_id": sync_id,
+                "status": "cancel_requested",
+                "timestamp_ms": current_timestamp_ms(),
+            })),
+        )
+            .into_response(),
+        Err(e) => {
+            error!(error = %e, sync_id = %sync_id, "Failed to set cancel flag");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error_code": "INTERNAL_ERROR",
+                    "message": "Failed to request cancel",
+                    "fallback_available": false,
+                    "timestamp_ms": current_timestamp_ms(),
+                    "request_id": null,
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
 // ── 共用：組裝 SyncStatusResponse ────────────────────────────────────────────
 
 async fn build_status_response(state: &AppState, sync_state: SyncState) -> impl IntoResponse {
@@ -296,6 +407,7 @@ async fn run_manual_sync_with_state_tracking(
     mut redis: MultiplexedConnection,
     sync_id: String,
     symbols: Vec<String>,
+    scope: SyncScope,
 ) {
     run_manual_sync(
         db_pool.clone(),
@@ -303,6 +415,7 @@ async fn run_manual_sync_with_state_tracking(
         rate_limiter,
         sync_id.clone(),
         symbols,
+        scope,
     )
     .await;
 

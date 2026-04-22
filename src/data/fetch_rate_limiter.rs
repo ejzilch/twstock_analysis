@@ -150,7 +150,7 @@ impl FinMindRateLimiter {
     ///   1. 檢查視窗是否已過 1 小時，若是則重置計數器
     ///   2. 若計數器達到安全上限（上限 - BUFFER），進入等待
     ///   3. 等待結束後重置計數器，允許繼續
-    ///   4. 計數器 +1，回傳 Ok
+    ///   4. 回傳 Ok（實際計數由 mark_request_used() 在成功請求後累加）
     pub async fn acquire(&self) -> Result<(), RateLimitWaiting> {
         // 重置視窗
         {
@@ -201,6 +201,11 @@ impl FinMindRateLimiter {
 
         self.request_counter.fetch_add(1, Ordering::Relaxed);
         Ok(())
+    }
+
+    /// 在確認請求有效送出後呼叫，累加本地使用量統計。
+    pub fn mark_request_used(&self) {
+        self.request_counter.fetch_add(1, Ordering::Relaxed);
     }
 }
 

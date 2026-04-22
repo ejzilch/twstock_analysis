@@ -8,32 +8,36 @@
 ///
 /// 本次新增：fetch_range()，供 manual_sync.rs 的缺口補齊使用。
 /// 現有函數（fetch_latest 等）不動，確保排程邏輯不受影響。
-use reqwest::Client;
-use serde::Deserialize;
-use tracing::{error, info, warn};
-
 use crate::constants::{FINMIND_API_BASE_URL, FINMIND_API_TIMEOUT_SECS, FINMIND_DATE_FORMAT};
 use crate::core::BridgeError;
 use crate::data::models::{current_timestamp_ms, RawCandle};
 use crate::models::enums::{DataSource, Interval};
 
+use reqwest::Client;
+use serde::Deserialize;
+use serde::Deserializer;
+use tracing::{error, info, warn};
+
 // ── FinMind API 回應結構 ──────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 struct FinMindResponse {
+    #[serde(deserialize_with = "de_status_code")]
     status: u32,
+    #[serde(default)]
     msg: String,
+    #[serde(default)]
     data: Vec<FinMindCandle>,
 }
 
 #[derive(Debug, Deserialize)]
 struct FinMindCandle {
-    date: String, // "2026-01-02"
-    open: f64,
-    max: f64, // FinMind 用 max/min，非 high/low
-    min: f64,
-    close: f64,
-    volume: f64,
+    date: Option<String>, // "2026-01-02"
+    open: Option<f64>,
+    max: Option<f64>, // FinMind 用 max/min，非 high/low
+    min: Option<f64>,
+    close: Option<f64>,
+    volume: Option<f64>,
 }
 
 // ── 現有函數（不動）──────────────────────────────────────────────────────────
@@ -109,10 +113,24 @@ pub async fn fetch_range(
             }
         })?;
 
-    let finmind_resp: FinMindResponse = response.json().await.map_err(|e| {
-        error!(error = %e, symbol = %symbol, "FinMind response deserialization failed");
+    let body = response.text().await.map_err(|e| {
+        error!(error = %e, symbol = %symbol, "Failed to read FinMind response body");
         BridgeError::FinMindDataSourceError {
-            context: "FinMind deserialization failed: ".into(),
+            context: "FinMind response body read failed: ".into(),
+            source: Some(Box::new(e)),
+        }
+    })?;
+
+    let finmind_resp: FinMindResponse = serde_json::from_str(&body).map_err(|e| {
+        let preview: String = body.chars().take(240).collect();
+        error!(
+            error = %e,
+            symbol = %symbol,
+            body_preview = %preview,
+            "FinMind response deserialization failed"
+        );
+        BridgeError::FinMindDataSourceError {
+            context: format!("FinMind deserialization failed: body={preview}"),
             source: Some(Box::new(e)),
         }
     })?;
@@ -139,31 +157,34 @@ pub async fn fetch_range(
         .data
         .into_iter()
         .filter_map(|row| {
+            let date = row.date?;
+            let open = row.open?;
+            let high = row.max?;
+            let low = row.min?;
+            let close = row.close?;
+            let volume = row.volume?;
+
             // 驗證數值合法性
-            if !row.open.is_finite()
-                || !row.max.is_finite()
-                || !row.min.is_finite()
-                || !row.close.is_finite()
-            {
+            if !open.is_finite() || !high.is_finite() || !low.is_finite() || !close.is_finite() {
                 warn!(
                     symbol = %symbol,
-                    date = %row.date,
+                    date = %date,
                     "Skipping candle with non-finite values"
                 );
                 return None;
             }
 
-            let timestamp_ms = date_str_to_ms(&row.date)?;
+            let timestamp_ms = date_str_to_ms(&date)?;
 
             Some(RawCandle {
                 symbol: symbol.to_string(),
                 timestamp_ms,
                 interval,
-                open: row.open,
-                high: row.max,
-                low: row.min,
-                close: row.close,
-                volume: row.volume as u64,
+                open,
+                high,
+                low,
+                close,
+                volume: volume as u64,
                 source: DataSource::FinMind,
                 created_at_ms,
             })
@@ -178,6 +199,23 @@ pub async fn fetch_range(
     );
 
     Ok(candles)
+}
+
+fn de_status_code<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Number(n) => n
+            .as_u64()
+            .map(|v| v as u32)
+            .ok_or_else(|| serde::de::Error::custom("invalid numeric status")),
+        serde_json::Value::String(s) => s
+            .parse::<u32>()
+            .map_err(|_| serde::de::Error::custom("invalid string status")),
+        _ => Err(serde::de::Error::custom("unsupported status type")),
+    }
 }
 
 // ── 內部工具函數 ──────────────────────────────────────────────────────────────

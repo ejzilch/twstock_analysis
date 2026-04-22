@@ -95,6 +95,10 @@ fn redis_key(sync_id: &str) -> String {
     format!("{}:{}", REDIS_SYNC_KEY_PREFIX, sync_id)
 }
 
+fn cancel_key(sync_id: &str) -> String {
+    format!("sync_cancel:{}", sync_id)
+}
+
 // ── Async Redis 操作 ──────────────────────────────────────────────────────────
 // AppState.redis_client 型別為 MultiplexedConnection（已連線），
 // 直接 clone() 取得副本使用，不需再 get_connection()。
@@ -177,4 +181,28 @@ pub async fn find_running_sync(
     }
 
     Ok(None)
+}
+
+/// 設定取消旗標，讓背景同步流程在下一個批次安全停止。
+pub async fn request_sync_cancel(
+    redis: &mut MultiplexedConnection,
+    sync_id: &str,
+) -> Result<(), BridgeError> {
+    let key = cancel_key(sync_id);
+    redis
+        .set_ex::<_, _, ()>(&key, "1", REDIS_SYNC_TTL_SECS)
+        .await
+        .map_err(|e| BridgeError::from_cache("request_sync_cancel failed", e))
+}
+
+/// 檢查是否已請求取消。
+pub async fn is_sync_cancel_requested(
+    redis: &mut MultiplexedConnection,
+    sync_id: &str,
+) -> Result<bool, BridgeError> {
+    let key = cancel_key(sync_id);
+    redis
+        .exists::<_, bool>(&key)
+        .await
+        .map_err(|e| BridgeError::from_cache("is_sync_cancel_requested failed", e))
 }

@@ -12,9 +12,9 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSymbols } from '@/src/hooks'
-import { useTriggerSync, useSyncStatus } from '@/src/hooks/useManualSync'
+import { useCancelSync, useTriggerSync, useSyncStatus } from '@/src/hooks/useManualSync'
 import { useAppStore } from '@/src/store/useAppStore'
-import { Card, Button, ErrorToast, LoadingSpinner } from '@/src/components/ui'
+import { Card, Button, ErrorToast } from '@/src/components/ui'
 import { SymbolSearchInput } from './SymbolSearchInput'
 import { SelectedSymbolTags } from './SelectedSymbolTags'
 import { SyncProgress } from './SyncProgress'
@@ -31,10 +31,14 @@ const TOP_10_SYMBOLS = [
 
 export function ManualSyncPanel() {
   const router = useRouter()
-  const syncId = useAppStore((s) => s.activeSyncId)
+  const queryClient = useQueryClient()
   const setActiveSyncId = useAppStore((s) => s.setActiveSyncId)
 
   const [selected, setSelected] = useState<SymbolItem[]>([])
+  const [fullSync, setFullSync] = useState(true)
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+  const [interval, setInterval] = useState<'1m' | '5m' | '15m' | '1h' | '4h' | '1d'>('1h')
 
   // ── 單一 useSymbols 呼叫，allSymbols 往下傳 ────────────────────────────────
   const {
@@ -46,6 +50,7 @@ export function ManualSyncPanel() {
   const allSymbols = symbolsData?.symbols ?? []
 
   const triggerSync = useTriggerSync()
+  const cancelSync = useCancelSync()
   const syncStatus = useSyncStatus()
 
   // ── 狀態機 ──────────────────────────────────────────────────────────────────
@@ -56,9 +61,31 @@ export function ManualSyncPanel() {
 
   // ── 股票選擇操作 ─────────────────────────────────────────────────────────────
 
+  function makeFallbackSymbol(symbol: string): SymbolItem {
+    const now = Date.now()
+    return {
+      symbol,
+      name: `股票 ${symbol}`,
+      exchange: 'TWSE',
+      data_source: 'finmind',
+      earliest_available_ms: now,
+      latest_available_ms: now,
+      is_active: true,
+      updated_at_ms: now,
+    }
+  }
+
   function handleSelect(symbol: SymbolItem) {
     if (selected.some((s) => s.symbol === symbol.symbol)) return
     setSelected((prev) => [...prev, symbol])
+  }
+
+  function handleSelectManualSymbol(symbolCode: string) {
+    const symbol = symbolCode.trim()
+    if (!symbol || selected.some((s) => s.symbol === symbol)) return
+
+    const fromList = allSymbols.find((s) => s.symbol === symbol)
+    setSelected((prev) => [...prev, fromList ?? makeFallbackSymbol(symbol)])
   }
 
   function handleRemove(symbolCode: string) {
@@ -66,10 +93,8 @@ export function ManualSyncPanel() {
   }
 
   function handleSelectTop10() {
-    // allSymbols 從 API 取得，symbols 清單必須已載入才能過濾
-    if (allSymbols.length === 0) return
-
-    const top10 = allSymbols.filter((s) => TOP_10_SYMBOLS.includes(s.symbol))
+    const top10 = TOP_10_SYMBOLS
+      .map((code) => allSymbols.find((s) => s.symbol === code) ?? makeFallbackSymbol(code))
     const toAdd = top10.filter(
       (s) => !selected.some((sel) => sel.symbol === s.symbol)
     )
@@ -87,16 +112,24 @@ export function ManualSyncPanel() {
 
   function handleStartSync() {
     if (selected.length === 0) return
-    triggerSync.mutate({ symbols: selected.map((s) => s.symbol) })
+    if (!fullSync && (!fromDate || !toDate)) return
+
+    triggerSync.mutate({
+      symbols: selected.map((s) => s.symbol),
+      fullSync,
+      fromDate: fullSync ? undefined : fromDate,
+      toDate: fullSync ? undefined : toDate,
+      intervals: fullSync ? undefined : [interval],
+    })
   }
 
   // ── 再次同步（重置）──────────────────────────────────────────────────────────
 
   function handleReset() {
-    useAppStore.getState().setActiveSyncId(null)
+    setActiveSyncId(null)
     setSelected([])
     // 清除 query cache 避免舊狀態殘留
-    useQueryClient().removeQueries({ queryKey: ['sync-status'] })
+    queryClient.removeQueries({ queryKey: ['sync-status'] })
   }
 
   // ── 渲染 ─────────────────────────────────────────────────────────────────────
@@ -107,10 +140,20 @@ export function ManualSyncPanel() {
 
       {/* 執行中：進度顯示 */}
       {isRunning && syncStatus.data && (
-        <SyncProgress
-          progress={syncStatus.data.progress}
-          rateLimit={syncStatus.data.rate_limit}
-        />
+        <div className="space-y-3">
+          <SyncProgress
+            progress={syncStatus.data.progress}
+            rateLimit={syncStatus.data.rate_limit}
+          />
+          <Button
+            variant="ghost"
+            onClick={() => cancelSync.mutate({ syncId: syncStatus.data!.sync_id })}
+            loading={cancelSync.isPending}
+            className="w-full"
+          >
+            取消同步
+          </Button>
+        </div>
       )}
 
       {/* 完成：結果顯示 */}
@@ -132,12 +175,12 @@ export function ManualSyncPanel() {
 
             <button
               onClick={handleSelectTop10}
-              disabled={symbolsLoading || symbolsError || allSymbols.length === 0}
+              disabled={false}
               className="text-xs px-2.5 py-1 rounded-lg bg-surface border border-surface-border
                          text-slate-400 hover:text-slate-200 hover:bg-surface-hover
                          transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {symbolsLoading ? '載入中...' : '前 10 大市值'}
+              前 10 大市值
             </button>
 
             {selected.length > 0 && (
@@ -163,6 +206,7 @@ export function ManualSyncPanel() {
             allSymbols={allSymbols}
             selectedSymbols={selected.map((s) => s.symbol)}
             onSelect={handleSelect}
+            onManualSelect={handleSelectManualSymbol}
             isLoading={symbolsLoading}
             isError={symbolsError}
           />
@@ -179,10 +223,53 @@ export function ManualSyncPanel() {
           </div>
 
           {/* 開始同步按鈕 */}
+          <div className="border border-surface-border rounded-lg p-3 bg-surface-card/40 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400">同步範圍</span>
+              <label className="text-xs text-slate-300 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={fullSync}
+                  onChange={(e) => setFullSync(e.target.checked)}
+                />
+                全量回補（從最舊到今天）
+              </label>
+            </div>
+
+            {!fullSync && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="px-2 py-1.5 rounded bg-surface border border-surface-border text-xs text-slate-200"
+                />
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="px-2 py-1.5 rounded bg-surface border border-surface-border text-xs text-slate-200"
+                />
+                <select
+                  value={interval}
+                  onChange={(e) => setInterval(e.target.value as typeof interval)}
+                  className="px-2 py-1.5 rounded bg-surface border border-surface-border text-xs text-slate-200"
+                >
+                  <option value="1m">1m</option>
+                  <option value="5m">5m</option>
+                  <option value="15m">15m</option>
+                  <option value="1h">1h</option>
+                  <option value="4h">4h</option>
+                  <option value="1d">1d</option>
+                </select>
+              </div>
+            )}
+          </div>
+
           <Button
             onClick={handleStartSync}
             loading={triggerSync.isPending}
-            disabled={selected.length === 0 || symbolsLoading}
+            disabled={selected.length === 0 || symbolsLoading || (!fullSync && (!fromDate || !toDate))}
             size="lg"
             className="w-full"
           >

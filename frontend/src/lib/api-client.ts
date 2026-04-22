@@ -1,9 +1,3 @@
-/**
- * Unified fetch wrapper.
- * - Injects X-API-KEY header on every request
- * - Parses error_code from non-2xx responses
- * - Throws ApiErrorException for downstream error-handler to process
- */
 import type { ApiError, ErrorCode } from '@/src/types/api.generated'
 
 export class ApiErrorException extends Error {
@@ -26,11 +20,25 @@ function getApiKey(): string {
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? ''
 
+function normalizeUrl(base: string, path: string): string {
+    const trimmedBase = base.replace(/\/+$/, '')
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`
+
+    if (
+        trimmedBase.endsWith('/api/v1') &&
+        normalizedPath.startsWith('/api/v1/')
+    ) {
+        return `${trimmedBase}${normalizedPath.replace('/api/v1', '')}`
+    }
+
+    return `${trimmedBase}${normalizedPath}`
+}
+
 export async function apiClient<T>(
     path: string,
     init: RequestInit = {},
 ): Promise<T> {
-    const url = `${BASE}${path}`
+    const url = normalizeUrl(BASE, path)
     const headers: HeadersInit = {
         'Content-Type': 'application/json',
         'X-API-KEY': getApiKey(),

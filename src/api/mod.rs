@@ -3,7 +3,7 @@ pub mod middleware;
 pub mod models;
 
 use crate::api::handlers::admin_sync::{
-    get_sync_status, get_sync_status_by_id, trigger_manual_sync,
+    cancel_manual_sync, get_sync_status, get_sync_status_by_id, trigger_manual_sync,
 };
 use crate::api::{
     handlers::{
@@ -61,13 +61,10 @@ pub fn build_router(app_state: Arc<AppState>, rate_limiter: RateLimiterState) ->
         .route("/signals/:symbol", get(signals_handler))
         .route("/predict", post(predict_handler))
         .route("/backtest", post(backtest_handler))
-        .route("/api/v1/admin/sync", post(trigger_manual_sync))
-        .route("/api/v1/admin/sync/status", get(get_sync_status))
-        .route(
-            "/api/v1/admin/sync/status/:sync_id",
-            get(get_sync_status_by_id),
-        )
-        .layer(cors)
+        .route("/admin/sync", post(trigger_manual_sync))
+        .route("/admin/sync/cancel/:sync_id", post(cancel_manual_sync))
+        .route("/admin/sync/status", get(get_sync_status))
+        .route("/admin/sync/status/:sync_id", get(get_sync_status_by_id))
         .layer(axum::middleware::from_fn(auth_middleware))
         .layer(axum::middleware::from_fn_with_state(
             rate_limiter,
@@ -78,4 +75,5 @@ pub fn build_router(app_state: Arc<AppState>, rate_limiter: RateLimiterState) ->
     Router::new()
         .merge(health_router)
         .nest("/api/v1", api_router)
+        .layer(cors)
 }
