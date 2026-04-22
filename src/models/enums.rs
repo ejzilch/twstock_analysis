@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::Type;
 use std::fmt;
 use std::str::FromStr;
-use strum::Display;
+use strum::{AsRefStr, Display, EnumString};
 
 /// 外部資料來源
 ///
@@ -10,12 +10,16 @@ use strum::Display;
 /// 上層模組不需感知來源差異。
 /// serde rename 確保序列化結果為 "finmind" / "yfinance"，
 /// 對應 API_CONTRACT.md 的 data_source 欄位格式。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Display, AsRefStr, EnumString,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DataSource {
     /// 主力來源：台股 (TWSE / TPEX)，走排程限流
+    #[strum(serialize = "finmind")]
     FinMind,
     /// 備用來源：補歷史資料用，禁止放在即時路徑
+    #[strum(serialize = "yfinance")]
     YFinance,
 }
 
@@ -23,13 +27,17 @@ pub enum DataSource {
 ///
 /// 對應 API_CONTRACT.md 的 exchange 欄位與 init_schema.sql 的 exchange 欄位。
 /// serde UPPERCASE 確保序列化結果為 "TWSE" / "TPEX"。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, Type)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, Type, AsRefStr, EnumString,
+)]
 #[sqlx(type_name = "text", rename_all = "UPPERCASE")]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Exchange {
     /// 台灣證券交易所
+    #[strum(serialize = "TWSE")]
     Twse,
     /// 證券櫃檯買賣中心
+    #[strum(serialize = "TPEX")]
     Tpex,
 }
 

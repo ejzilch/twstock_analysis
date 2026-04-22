@@ -71,35 +71,38 @@ export function CandleChart({ candles, signals = [], height = 500, showVolume = 
             }
 
             // ── MA Lines ────────────────────────────────────────────────────────────
-            const firstCandle = candles[0]
-            if (firstCandle.indicators['ma5'] !== undefined) {
+            const hasMa5 = candles.some((c) => c.indicators?.['ma5'] != null)
+            const hasMa20 = candles.some((c) => c.indicators?.['ma20'] != null)
+            const hasMa50 = candles.some((c) => c.indicators?.['ma50'] != null)
+            const hasBollinger = candles.some((c) => c.indicators?.['bollinger'] != null)
+            if (hasMa5) {
                 const ma5 = chart.addLineSeries({ color: INDICATOR_COLORS.ma5, lineWidth: 1, priceLineVisible: false })
                 ma5.setData(candles
-                    .filter((c) => c.indicators['ma5'] != null)
-                    .map((c) => ({ time: (c.timestamp_ms / 1000) as Time, value: c.indicators['ma5'] as number })))
+                    .filter((c) => c.indicators?.['ma5'] != null)
+                    .map((c) => ({ time: (c.timestamp_ms / 1000) as Time, value: c.indicators?.['ma5'] as number })))
             }
-            if (firstCandle.indicators['ma20'] !== undefined) {
+
+            if (hasMa20) {
                 const ma20 = chart.addLineSeries({ color: INDICATOR_COLORS.ma20, lineWidth: 1, priceLineVisible: false })
-                ma20.setData(candles
-                    .filter((c) => c.indicators['ma20'] != null)
-                    .map((c) => ({ time: (c.timestamp_ms / 1000) as Time, value: c.indicators['ma20'] as number })))
+                ma20.setData(candles.filter((c) => c.indicators?.['ma20'] != null)
+                    .map((c) => ({ time: (c.timestamp_ms / 1000) as Time, value: c.indicators?.['ma20'] as number })))
             }
-            if (firstCandle.indicators['ma50'] !== undefined) {
+
+            if (hasMa50) {
                 const ma50 = chart.addLineSeries({ color: INDICATOR_COLORS.ma50, lineWidth: 1, priceLineVisible: false })
-                ma50.setData(candles
-                    .filter((c) => c.indicators['ma50'] != null)
-                    .map((c) => ({ time: (c.timestamp_ms / 1000) as Time, value: c.indicators['ma50'] as number })))
+                ma50.setData(candles.filter((c) => c.indicators?.['ma50'] != null)
+                    .map((c) => ({ time: (c.timestamp_ms / 1000) as Time, value: c.indicators?.['ma50'] as number })))
             }
 
             // ── Bollinger Bands ─────────────────────────────────────────────────────
-            if (firstCandle.indicators['bollinger'] !== undefined) {
+            if (hasBollinger) {
                 const lineOpts = { color: INDICATOR_COLORS.bollMid, lineWidth: 1 as const, lineStyle: LineStyle.Dashed, priceLineVisible: false }
                 const upper = chart.addLineSeries({ ...lineOpts, color: INDICATOR_COLORS.bollUpper })
                 const mid = chart.addLineSeries({ ...lineOpts })
                 const lower = chart.addLineSeries({ ...lineOpts, color: INDICATOR_COLORS.bollLower })
 
-                candles.filter((c) => c.indicators['bollinger'] != null).forEach((c) => {
-                    const b = c.indicators['bollinger'] as { upper: number; middle: number; lower: number }
+                candles.filter((c) => c.indicators?.['bollinger'] != null).forEach((c) => {
+                    const b = c.indicators?.['bollinger'] as { upper: number; middle: number; lower: number }
                     const t = c.timestamp_ms / 1000
                     upper.update({ time: t as Time, value: b.upper })
                     mid.update({ time: t as Time, value: b.middle })
