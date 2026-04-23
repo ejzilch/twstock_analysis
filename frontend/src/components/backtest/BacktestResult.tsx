@@ -3,13 +3,20 @@ import type { BacktestResponse } from '@/src/types/api.generated'
 import { formatCapital, formatPercent } from '@/src/lib/utils'
 import { Card } from '@/src/components/ui'
 import { MetricCard } from '@/src/components/backtest'
+import { useAppStore } from '@/src/store/useAppStore'
 
 interface BacktestResultProps { result: BacktestResponse }
 
 export function BacktestResult({ result }: BacktestResultProps) {
     const { metrics } = result
+    const colorMode = useAppStore((s) => s.colorMode)
     const pnl = result.final_capital - result.initial_capital
     const pnlPositive = pnl >= 0
+
+    // TW：賺錢紅字；US：賺錢綠字
+    const profitColor = colorMode === 'TW' ? 'text-red-400' : 'text-emerald-400'
+    const lossColor = colorMode === 'TW' ? 'text-emerald-400' : 'text-red-400'
+    const pnlColor = pnlPositive ? profitColor : lossColor
 
     return (
         <Card>
@@ -18,7 +25,7 @@ export function BacktestResult({ result }: BacktestResultProps) {
                     <h3 className="text-sm font-semibold text-slate-200" > {result.strategy_name} </h3>
                     < p className="text-xs text-slate-500 mt-0.5" > {result.symbol} </p>
                 </div>
-                < div className={clsx('text-right', pnlPositive ? 'text-emerald-400' : 'text-red-400')} >
+                < div className={clsx('text-right', pnlColor)} >
                     <div className="text-xl font-bold font-mono" > {formatCapital(result.final_capital)} </div>
                     < div className="text-xs opacity-80" >
                         {pnlPositive ? '+' : ''}{formatCapital(pnl)}

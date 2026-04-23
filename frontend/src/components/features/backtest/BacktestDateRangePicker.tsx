@@ -23,7 +23,7 @@ function getRange(key: RangeKey): DateRange {
         case '6M': return { from: new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()), to: now }
         case '1Y': return { from: new Date(now.getFullYear() - 1, now.getMonth(), now.getDate()), to: now }
         case 'YTD': return { from: new Date(now.getFullYear(), 0, 1), to: now }
-        case 'MAX': return { from: new Date(2000, 0, 1), to: now }
+        case 'MAX': return { from: new Date(now.getFullYear() - 6, 0, 1), to: now }
         default: return { from: now, to: now }
     }
 }

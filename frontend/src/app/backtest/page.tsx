@@ -48,8 +48,10 @@ export default function BacktestPage() {
                             <BacktestResult result={backtest.data} />
                             <BacktestChart
                                 symbol={backtest.data.symbol}
+                                strategyName={backtest.data.strategy_name}
                                 from_ms={backtest.data.from_ms}
                                 to_ms={backtest.data.to_ms}
+                                exitFilterPct={backtest.data.exit_filter_pct}
                             />
                         </>
                     )}
