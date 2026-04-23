@@ -13,12 +13,12 @@ use crate::api::handlers::sync_state::is_sync_cancel_requested;
 use crate::constants::{FINMIND_API_TOKEN_ENV, MANUAL_SYNC_BATCH_DAYS};
 use crate::core::BridgeError;
 use crate::data::db::{sync_log_update_counts, sync_log_update_status, BulkInsertBuffer};
-use crate::data::fetch::fetch_range;
+use crate::data::fetch::{fetch_range, fetch_stock_info_map};
 use crate::data::fetch_rate_limiter::{FinMindRateLimiter, SyncProgress};
 use crate::data::implementations::{PostgresDbWriter, RedisInvalidator};
 use crate::data::models::current_timestamp_ms;
-use crate::data::symbol_sync::get_finmind_earliest_ms;
-use crate::models::enums::Interval;
+use crate::data::symbol_sync::{get_finmind_earliest_ms, upsert_symbols, SymbolSyncData};
+use crate::models::enums::{DataSource, Exchange, Interval};
 use chrono::{Duration, NaiveDate, Utc};
 use redis::aio::MultiplexedConnection;
 use reqwest::Client;
@@ -319,7 +319,7 @@ pub async fn fetch_and_insert_gap(
         .await
         {
             Ok(candles) => {
-                rate_limiter.mark_request_used();
+                rate_limiter.mark_request_used().await;
                 let fetched = candles.len() as i32;
 
                 for candle in candles {
@@ -422,6 +422,16 @@ pub async fn run_manual_sync(
             return;
         }
     };
+
+    if let Err(e) =
+        ensure_symbols_metadata(&db_pool, &http_client, &rate_limiter, &symbols, &sync_id).await
+    {
+        warn!(
+            error = %e,
+            sync_id = %sync_id,
+            "Failed to refresh symbols metadata before manual sync; continue with fallback"
+        );
+    }
 
     // Step 1: 偵測所有缺口
     let gaps = match detect_gaps(&db_pool, &symbols, &scope).await {
@@ -528,6 +538,54 @@ fn ms_to_naive_date(ms: i64) -> NaiveDate {
     chrono::DateTime::from_timestamp(secs, 0)
         .unwrap_or_default()
         .date_naive()
+}
+
+async fn ensure_symbols_metadata(
+    db_pool: &PgPool,
+    http_client: &Client,
+    rate_limiter: &Arc<FinMindRateLimiter>,
+    symbols: &[String],
+    sync_id: &str,
+) -> Result<(), BridgeError> {
+    if symbols.is_empty() {
+        return Ok(());
+    }
+
+    let api_token = std::env::var(FINMIND_API_TOKEN_ENV).unwrap_or_default();
+
+    rate_limiter.acquire().await.ok();
+    let stock_info_map = fetch_stock_info_map(http_client, &api_token).await?;
+    rate_limiter.mark_request_used().await;
+
+    let now_ms = current_timestamp_ms();
+    let upsert_payload: Vec<SymbolSyncData> = symbols
+        .iter()
+        .map(|symbol| {
+            let info = stock_info_map.get(symbol);
+            SymbolSyncData {
+                symbol: symbol.clone(),
+                name: info
+                    .map(|s| s.name.clone())
+                    .unwrap_or_else(|| format!("股票 {}", symbol)),
+                exchange: info.map(|s| s.exchange).unwrap_or(Exchange::Twse),
+                data_source: DataSource::FinMind,
+                finmind_earliest_ms: None,
+                latest_ms: now_ms,
+                is_active: true,
+            }
+        })
+        .collect();
+
+    let summary = upsert_symbols(db_pool, &upsert_payload, now_ms).await?;
+    info!(
+        sync_id = %sync_id,
+        inserted = summary.inserted,
+        updated = summary.updated,
+        failed = summary.failed,
+        "Manual sync metadata upsert completed"
+    );
+
+    Ok(())
 }
 
 #[cfg(test)]

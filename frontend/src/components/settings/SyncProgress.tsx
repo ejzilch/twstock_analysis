@@ -18,6 +18,7 @@ export function SyncProgress({ progress, rateLimit }: SyncProgressProps) {
   const [collapsed, setCollapsed] = useState(false)
 
   const usedPct = Math.round((rateLimit.used_this_hour / rateLimit.limit_per_hour) * 100)
+  const remaining = Math.max(rateLimit.used_this_hour, 0)
 
   return (
     <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
@@ -40,13 +41,13 @@ export function SyncProgress({ progress, rateLimit }: SyncProgressProps) {
           {/* Rate limit bar */}
           <div>
             <div className="flex items-center justify-between text-xs mb-1.5">
-              <span className="text-slate-400">API 使用量</span>
+              <span className="text-slate-400">API 剩餘次數</span>
               <span className={clsx(
                 'font-mono',
                 usedPct >= 90 ? 'text-red-400' :
                   usedPct >= 70 ? 'text-amber-400' : 'text-slate-300',
               )}>
-                {rateLimit.used_this_hour} / {rateLimit.limit_per_hour} 次
+                {remaining} / {rateLimit.limit_per_hour} 次
               </span>
             </div>
             <div className="h-2 bg-surface-border rounded-full overflow-hidden">
