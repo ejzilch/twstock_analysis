@@ -19,12 +19,14 @@ import { useAppStore } from '@/src/store/useAppStore'
 import type {
   ManualSyncAcceptedResponse,
   ManualSyncRequest,
+  RateLimitInfo,
   SyncStatus,
   SyncStatusResponse,
 } from '@/src/types/api.generated'
 
-// 輪詢間隔：10 秒
+// 輪詢間隔：同步狀態 10 秒；API quota 30 秒
 const SYNC_POLL_INTERVAL_MS = 10_000
+const RATE_LIMIT_POLL_INTERVAL_MS = 30_000
 const API_V1_PREFIX = '/api/v1'
 
 function buildAdminSyncPath(path: string): string {
@@ -189,4 +191,17 @@ export function useSyncStatus() {
   */
 
   return query
+}
+
+export function useRateLimitInfo() {
+  return useQuery<RateLimitInfo>({
+    queryKey: ['sync-rate-limit'],
+    queryFn: () =>
+      apiClient<RateLimitInfo>(buildAdminSyncPath('/admin/sync/rate-limit')),
+    refetchInterval: RATE_LIMIT_POLL_INTERVAL_MS,
+    refetchIntervalInBackground: false,
+    staleTime: 0,
+    throwOnError: false,
+    retry: false,
+  })
 }

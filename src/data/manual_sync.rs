@@ -319,7 +319,7 @@ pub async fn fetch_and_insert_gap(
         .await
         {
             Ok(candles) => {
-                rate_limiter.mark_request_used();
+                rate_limiter.mark_request_used().await;
                 let fetched = candles.len() as i32;
 
                 for candle in candles {

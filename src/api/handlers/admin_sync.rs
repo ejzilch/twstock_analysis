@@ -373,12 +373,28 @@ pub async fn cancel_manual_sync(
     }
 }
 
+/// 查詢 FinMind API quota（不需有進行中的 sync）。
+pub async fn get_rate_limit_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let rate_limit = RateLimitInfo {
+        used_this_hour: state.rate_limiter.used_this_hour().await,
+        limit_per_hour: state.rate_limiter.limit_per_hour(),
+        is_waiting: state.rate_limiter.is_waiting().await,
+        resume_at_ms: state.rate_limiter.resume_at_ms().await,
+    };
+
+    (
+        StatusCode::OK,
+        Json(serde_json::to_value(rate_limit).unwrap_or_default()),
+    )
+        .into_response()
+}
+
 // ── 共用：組裝 SyncStatusResponse ────────────────────────────────────────────
 
 async fn build_status_response(state: &AppState, sync_state: SyncState) -> impl IntoResponse {
     let rate_limit = RateLimitInfo {
-        used_this_hour: state.rate_limiter.used_this_hour(),
-        limit_per_hour: FINMIND_RATE_LIMIT_PER_HOUR,
+        used_this_hour: state.rate_limiter.used_this_hour().await,
+        limit_per_hour: state.rate_limiter.limit_per_hour(),
         is_waiting: state.rate_limiter.is_waiting().await,
         resume_at_ms: state.rate_limiter.resume_at_ms().await,
     };

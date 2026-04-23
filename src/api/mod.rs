@@ -3,7 +3,8 @@ pub mod middleware;
 pub mod models;
 
 use crate::api::handlers::admin_sync::{
-    cancel_manual_sync, get_sync_status, get_sync_status_by_id, trigger_manual_sync,
+    cancel_manual_sync, get_rate_limit_info, get_sync_status, get_sync_status_by_id,
+    trigger_manual_sync,
 };
 use crate::api::{
     handlers::{
@@ -65,6 +66,7 @@ pub fn build_router(app_state: Arc<AppState>, rate_limiter: RateLimiterState) ->
         .route("/admin/sync/cancel/:sync_id", post(cancel_manual_sync))
         .route("/admin/sync/status", get(get_sync_status))
         .route("/admin/sync/status/:sync_id", get(get_sync_status_by_id))
+        .route("/admin/sync/rate-limit", get(get_rate_limit_info))
         .layer(axum::middleware::from_fn(auth_middleware))
         .layer(axum::middleware::from_fn_with_state(
             rate_limiter,
