@@ -85,11 +85,14 @@ export function toTradingViewCandle(candle: CandleItem): TradingViewCandle {
     }
 }
 
-export function toTradingViewVolume(candle: CandleItem): TradingViewVolume {
+export function toTradingViewVolume(candle: CandleItem, colorMode: 'TW' | 'US'): TradingViewVolume {
+    const isUp = candle.close >= candle.open
+    const upColor = colorMode === 'TW' ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)'
+    const downColor = colorMode === 'TW' ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'
     return {
         time: (candle.timestamp_ms / 1000) as Time,
         value: candle.volume,
-        color: candle.close >= candle.open ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)',
+        color: isUp ? upColor : downColor,
     }
 }
 

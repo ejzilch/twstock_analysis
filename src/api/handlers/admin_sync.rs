@@ -9,7 +9,7 @@
 ///   4. BridgeError variant 對齊現有定義
 ///   5. find_running_sync / save_sync_state / load_sync_state 改為 async
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
-use chrono::NaiveDate;
+use chrono::{Local, Months, NaiveDate};
 use redis::aio::MultiplexedConnection;
 use reqwest::Client;
 use sqlx::PgPool;
@@ -58,8 +58,12 @@ pub async fn trigger_manual_sync(
     }
 
     let full_sync = body.full_sync.unwrap_or(true);
+    let today = Local::now().date_naive();
+    let five_years_ago = today
+        .checked_sub_months(Months::new(72))
+        .expect("日期計算發生錯誤");
     let from_date = if full_sync {
-        None
+        Some(five_years_ago)
     } else {
         match body
             .from_date
@@ -84,7 +88,7 @@ pub async fn trigger_manual_sync(
     };
 
     let to_date = if full_sync {
-        None
+        Some(today)
     } else {
         match body
             .to_date

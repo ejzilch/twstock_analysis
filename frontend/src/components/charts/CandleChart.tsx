@@ -3,27 +3,36 @@ import { useEffect, useRef } from 'react'
 import type { CandleItem, SignalItem } from '@/src/types/api.generated'
 import { toTradingViewCandle, toTradingViewVolume } from '@/src/lib/utils'
 import { Time } from 'lightweight-charts';
+import { useAppStore } from '@/src/store/useAppStore'
 
 interface CandleChartProps {
     candles: CandleItem[]
     signals?: SignalItem[]
     height?: number
     showVolume?: boolean
+    markerTextMode?: 'signalWithConfidence' | 'signalOnly'
 }
 
-
-
-export function CandleChart({ candles, signals = [], height = 500, showVolume = true }: CandleChartProps) {
+export function CandleChart({
+    candles,
+    signals = [],
+    height = 500,
+    showVolume = true,
+    markerTextMode = 'signalWithConfidence',
+}: CandleChartProps) {
     const containerRef = useRef<HTMLDivElement>(null)
     const chartRef = useRef<ReturnType<typeof import('lightweight-charts')['createChart']> | null>(null)
+    const colorMode = useAppStore((s) => s.colorMode)
 
     useEffect(() => {
         if (!containerRef.current || candles.length === 0) return
 
+        let isMounted = true
+
         let chart: ReturnType<typeof import('lightweight-charts')['createChart']> | null = null
 
         import('lightweight-charts').then(({ createChart, CrosshairMode, LineStyle }) => {
-            if (!containerRef.current) return
+            if (!isMounted || !containerRef.current) return
 
             chart = createChart(containerRef.current, {
                 width: containerRef.current.clientWidth,
@@ -36,7 +45,7 @@ export function CandleChart({ candles, signals = [], height = 500, showVolume = 
                     vertLines: { color: '#1e2a3a' },
                     horzLines: { color: '#1e2a3a' },
                 },
-                crosshair: { mode: CrosshairMode.Normal },
+                crosshair: { mode: CrosshairMode.Magnet },
                 rightPriceScale: { borderColor: '#1e2a3a' },
                 timeScale: {
                     borderColor: '#1e2a3a',
@@ -46,27 +55,38 @@ export function CandleChart({ candles, signals = [], height = 500, showVolume = 
             })
             chartRef.current = chart
 
+            // TW 模式：紅漲綠跌；US 模式：綠漲紅跌
+            const upColor = colorMode === 'TW' ? '#ef4444' : '#10b981'
+            const downColor = colorMode === 'TW' ? '#10b981' : '#ef4444'
+
             // ── Candlestick Series ──────────────────────────────────────────────────
             const candleSeries = chart.addCandlestickSeries({
-                upColor: '#10b981',
-                downColor: '#ef4444',
-                borderUpColor: '#10b981',
-                borderDownColor: '#ef4444',
-                wickUpColor: '#10b981',
-                wickDownColor: '#ef4444',
+                upColor,
+                downColor,
+                borderUpColor: upColor,
+                borderDownColor: downColor,
+                wickUpColor: upColor,
+                wickDownColor: downColor,
             })
             candleSeries.setData(candles.map(toTradingViewCandle))
 
             // ── Signal Markers ──────────────────────────────────────────────────────
             if (signals.length > 0) {
-                const markers = signals.map((s) => ({
-                    time: (s.timestamp_ms / 1000) as Time,
-                    position: s.signal_type === 'BUY' ? 'belowBar' as const : 'aboveBar' as const,
-                    color: s.signal_type === 'BUY' ? '#4CAF50' : '#F44336',
-                    shape: s.signal_type === 'BUY' ? 'arrowUp' as const : 'arrowDown' as const,
-                    text: `${s.signal_type} ${(s.confidence * 100).toFixed(0)}%`,
-                    size: s.reliability === 'low' ? 1 : 2,
-                }))
+                const firstCandleMs = candles[0].timestamp_ms
+                const lastCandleMs = candles[candles.length - 1].timestamp_ms
+                const markers = signals
+                    .filter((s) => s.timestamp_ms >= firstCandleMs && s.timestamp_ms <= lastCandleMs)
+                    .sort((a, b) => a.timestamp_ms - b.timestamp_ms)
+                    .map((s) => ({
+                        time: (s.timestamp_ms / 1000) as Time,
+                        position: s.signal_type === 'BUY' ? 'belowBar' as const : 'aboveBar' as const,
+                        color: s.signal_type === 'BUY' ? '#4CAF50' : '#F44336',
+                        shape: s.signal_type === 'BUY' ? 'arrowUp' as const : 'arrowDown' as const,
+                        text: markerTextMode === 'signalOnly'
+                            ? s.signal_type
+                            : `${s.signal_type} ${(s.confidence * 100).toFixed(0)}%`,
+                        size: s.reliability === 'low' ? 1 : 2,
+                    }))
                 candleSeries.setMarkers(markers)
             }
 
@@ -117,7 +137,7 @@ export function CandleChart({ candles, signals = [], height = 500, showVolume = 
                     priceScaleId: 'volume',
                 })
                 chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } })
-                volSeries.setData(candles.map(toTradingViewVolume))
+                volSeries.setData(candles.map((c) => toTradingViewVolume(c, colorMode)))
             }
 
             // ── Responsive resize ───────────────────────────────────────────────────
@@ -131,8 +151,12 @@ export function CandleChart({ candles, signals = [], height = 500, showVolume = 
             return () => resizeObserver.disconnect()
         })
 
-        return () => { chart?.remove() }
-    }, [candles, signals, height, showVolume])
+        return () => {
+            isMounted = false
+            chart?.remove()   // 若 .then() 已執行，這裡能正確拿到 chart
+        }
+
+    }, [candles, signals, height, showVolume, colorMode])
 
     return <div ref={containerRef} style={{ height }} className="w-full rounded-lg overflow-hidden" />
 }

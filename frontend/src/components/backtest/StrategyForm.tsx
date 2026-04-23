@@ -13,6 +13,7 @@ interface StrategyFormProps {
         to_ms: number
         initial_capital: number
         position_size_percent: number
+        exit_filter_pct: number
     }) => void
     isLoading: boolean
 }
@@ -29,11 +30,14 @@ export function StrategyForm({ onSubmit, isLoading }: StrategyFormProps) {
     const [strategy, setStrategy] = useState('trend_follow_v1')
     const [capital, setCapital] = useState('100000')
     const [positionSize, setPositionSize] = useState('100')
+    const [exitFilterPct, setExitFilterPct] = useState('1.5')
 
-    const [dateRange, setDateRange] = useState<DateValueType>({
-        startDate: new Date(2025, 0, 1),
-        endDate: new Date(2025, 11, 1)
-    })
+    const now = Date.now()
+    const oneYearAgo = new Date()
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
+    const [fromMs, setFromMs] = useState<number>(oneYearAgo.getTime())
+    const [toMs, setToMs] = useState<number>(now)
+
 
     const symbolOptions = (symbolsData?.symbols ?? []).map((s) => ({
         value: s.symbol,
@@ -41,8 +45,6 @@ export function StrategyForm({ onSubmit, isLoading }: StrategyFormProps) {
     }))
 
     function handleSubmit() {
-        const fromMs = dateRange?.startDate?.getTime() ?? new Date(2025, 0, 1).getTime()
-        const toMs = dateRange?.endDate?.getTime() ?? new Date(2025, 11, 1).getTime()
         onSubmit({
             symbol,
             strategy_name: strategy,
@@ -50,6 +52,7 @@ export function StrategyForm({ onSubmit, isLoading }: StrategyFormProps) {
             to_ms: toMs,
             initial_capital: parseFloat(capital),
             position_size_percent: parseInt(positionSize, 10),
+            exit_filter_pct: parseFloat(exitFilterPct),
         })
     }
 
@@ -73,13 +76,15 @@ export function StrategyForm({ onSubmit, isLoading }: StrategyFormProps) {
                     <label className="text-sm text-slate-400" > 回測區間 </label>
                     < BacktestDateRangePicker
                         onChange={({ from_ms, to_ms }) => {
-                            // 存到 state 或直接丟 API
+                            setFromMs(from_ms)
+                            setToMs(to_ms)
                         }
                         }
                     />
                 </div>
-                < Input label="初始資金 (TWD)" value={capital} onChange={setCapital} placeholder="100000" />
+                <Input label="初始資金 (TWD)" value={capital} onChange={setCapital} placeholder="100000" />
                 <Input label="倉位比例 (%)" value={positionSize} onChange={setPositionSize} placeholder="100" />
+                <Input label="出場濾網 (%)" value={exitFilterPct} onChange={setExitFilterPct} placeholder="1.5" />
             </div>
             < div className="mt-5" >
                 <Button onClick={handleSubmit} loading={isLoading} className="w-full" size="lg" >
