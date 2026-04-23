@@ -1,5 +1,3 @@
-/// src/data/fetch.rs
-///
 /// 外部 API 呼叫層。
 ///
 /// 資料來源優先級：
@@ -11,11 +9,11 @@
 use crate::constants::{FINMIND_API_BASE_URL, FINMIND_API_TIMEOUT_SECS, FINMIND_DATE_FORMAT};
 use crate::core::BridgeError;
 use crate::data::models::{current_timestamp_ms, RawCandle};
-use crate::models::enums::{DataSource, Interval};
+use crate::models::enums::{DataSource, Exchange, Interval};
+use std::collections::HashMap;
 
 use reqwest::Client;
-use serde::Deserialize;
-use serde::Deserializer;
+use serde::{Deserialize, Deserializer};
 use tracing::{error, info, warn};
 
 // ── FinMind API 回應結構 ──────────────────────────────────────────────────────
@@ -50,10 +48,31 @@ struct FinMindCandle {
     volume: Option<f64>,
 }
 
-// ── 現有函數（不動）──────────────────────────────────────────────────────────
+#[derive(Debug, Deserialize)]
+struct FinMindStockInfoResponse {
+    #[serde(deserialize_with = "de_status_code")]
+    status: u32,
+    #[serde(default)]
+    msg: String,
+    #[serde(default)]
+    data: Vec<FinMindStockInfoRow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FinMindStockInfoRow {
+    stock_id: String,
+    stock_name: String,
+    #[serde(rename = "type")]
+    stock_type: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StockInfo {
+    pub name: String,
+    pub exchange: Exchange,
+}
 
 /// 取得指定股票的最新 K 線（排程用）。
-/// 此函數為現有排程邏輯使用，本次不修改。
 pub async fn fetch_latest(
     client: &Client,
     symbol: &str,
@@ -129,7 +148,7 @@ pub async fn fetch_range(
             }
         })?;
 
-    let body = response.text().await.map_err(|e| {
+    let body_text = response.text().await.map_err(|e| {
         error!(error = %e, symbol = %symbol, "Failed to read FinMind response body");
         BridgeError::FinMindDataSourceError {
             context: "FinMind response body read failed: ".into(),
@@ -137,14 +156,14 @@ pub async fn fetch_range(
         }
     })?;
 
-    tracing::debug!(body = %&body[..500.min(body.len())], "FinMind raw response");
+    tracing::debug!(body_text  = %&body_text [..500.min(body_text .len())], "FinMind raw response");
 
-    let finmind_resp: FinMindResponse = serde_json::from_str(&body).map_err(|e| {
-        let preview: String = body.chars().take(240).collect();
+    let finmind_resp: FinMindResponse = serde_json::from_str(&body_text).map_err(|e| {
+        let preview: String = body_text.chars().take(240).collect();
         error!(
             error = %e,
             symbol = %symbol,
-            body_preview = %&body[..200.min(body.len())],
+            body_preview = %&body_text [..200.min(body_text .len())],
             "FinMind response deserialization failed"
         );
         BridgeError::FinMindDataSourceError {
@@ -217,6 +236,73 @@ pub async fn fetch_range(
     );
 
     Ok(candles)
+}
+
+/// 從 FinMind TaiwanStockInfo 取得股票名稱與交易所資訊。
+///
+/// 回傳 key 為 symbol（stock_id）的 map，供手動同步補齊 symbols metadata 使用。
+pub async fn fetch_stock_info_map(
+    client: &Client,
+    api_token: &str,
+) -> Result<HashMap<String, StockInfo>, BridgeError> {
+    let base = std::env::var(FINMIND_API_BASE_URL).expect("FINMIND_API_BASE not set");
+    let url = format!("{base}/data?dataset=TaiwanStockInfo&token={api_token}");
+
+    let response = client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(FINMIND_API_TIMEOUT_SECS))
+        .send()
+        .await
+        .map_err(|e| BridgeError::FinMindDataSourceError {
+            context: "FinMind TaiwanStockInfo request failed: ".into(),
+            source: Some(Box::new(e)),
+        })?;
+
+    let body = response
+        .text()
+        .await
+        .map_err(|e| BridgeError::FinMindDataSourceError {
+            context: "FinMind TaiwanStockInfo response body read failed: ".into(),
+            source: Some(Box::new(e)),
+        })?;
+
+    let finmind_resp: FinMindStockInfoResponse =
+        serde_json::from_str(&body).map_err(|e| BridgeError::FinMindDataSourceError {
+            context: "FinMind TaiwanStockInfo deserialization failed: ".into(),
+            source: Some(Box::new(e)),
+        })?;
+
+    if finmind_resp.status != 200 {
+        return Err(BridgeError::FinMindDataSourceError {
+            context: format!(
+                "FinMind TaiwanStockInfo error: status={}, msg={}",
+                finmind_resp.status, finmind_resp.msg
+            ),
+            source: None,
+        });
+    }
+
+    let mapped = finmind_resp
+        .data
+        .into_iter()
+        .filter_map(|row| {
+            let exchange = match row.stock_type.to_ascii_lowercase().as_str() {
+                "twse" | "tse" => Exchange::Twse,
+                "tpex" | "otc" => Exchange::Tpex,
+                _ => return None,
+            };
+
+            Some((
+                row.stock_id.clone(),
+                StockInfo {
+                    name: row.stock_name,
+                    exchange,
+                },
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+
+    Ok(mapped)
 }
 
 fn de_status_code<'de, D>(deserializer: D) -> Result<u32, D::Error>

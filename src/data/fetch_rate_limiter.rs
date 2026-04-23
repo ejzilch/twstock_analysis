@@ -1,5 +1,3 @@
-/// src/data/fetch_rate_limiter.rs
-///
 /// FinMind API 排程限流器。
 ///
 /// 在現有基礎上擴充：
@@ -8,17 +6,14 @@
 ///   - 排程與手動同步共用同一個實例（由 AppState 持有）
 ///
 /// ApiTier 付費升級介面維持不動（Gemini 原始設計）。
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use chrono::{Timelike, Utc};
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::info;
 
-use crate::constants::{
-    FINMIND_RATE_LIMIT_BUFFER, FINMIND_RATE_LIMIT_PER_HOUR, FINMIND_RATE_LIMIT_WAIT_SECS,
-};
+use crate::constants::{FINMIND_RATE_LIMIT_BUFFER, FINMIND_RATE_LIMIT_PER_HOUR};
 
 // ── ApiTier（Gemini 原始設計，維持不動）──────────────────────────────────────
 
@@ -79,8 +74,7 @@ pub struct SyncProgress {
 #[derive(Debug)]
 pub struct FinMindRateLimiter {
     config: RateLimitConfig,
-    request_counter: AtomicU32,
-    window_start: Mutex<Instant>,
+    usage_timestamps: Mutex<VecDeque<Instant>>,
     /// 達到 rate limit 時的等待結束時間（None 表示目前不在等待）
     resume_at: Mutex<Option<Instant>>,
     /// 最後記錄的進度（供等待後繼續使用）
@@ -91,8 +85,7 @@ impl FinMindRateLimiter {
     pub fn new(tier: ApiTier) -> Arc<Self> {
         Arc::new(Self {
             config: RateLimitConfig::for_tier(tier),
-            request_counter: AtomicU32::new(0),
-            window_start: Mutex::new(Instant::now()),
+            usage_timestamps: Mutex::new(VecDeque::new()),
             resume_at: Mutex::new(None),
             last_progress: Mutex::new(SyncProgress::default()),
         })
@@ -105,9 +98,21 @@ impl FinMindRateLimiter {
         info!(tier = ?new_tier, "FinMind ApiTier upgraded");
     }
 
-    /// 取得目前每小時已使用的請求次數。
-    pub fn used_this_hour(&self) -> u32 {
-        self.request_counter.load(Ordering::Relaxed)
+    /// 取得目前每小時已使用的請求次數（清理過期紀錄後）。
+    pub async fn used_this_hour(&self) -> u32 {
+        let mut timestamps = self.usage_timestamps.lock().await;
+        let now = Instant::now();
+        let window = Duration::from_secs(3_600);
+
+        while let Some(oldest) = timestamps.front() {
+            if now.duration_since(*oldest) >= window {
+                timestamps.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        timestamps.len() as u32
     }
 
     /// 取得 rate limit 上限。
@@ -148,65 +153,61 @@ impl FinMindRateLimiter {
     /// 在執行每次 FinMind 請求前呼叫。
     ///
     /// 行為：
-    ///   1. 檢查視窗是否已過 1 小時，若是則重置計數器
-    ///   2. 若計數器達到安全上限（上限 - BUFFER），進入等待
-    ///   3. 等待結束後重置計數器，允許繼續
+    ///   1. 清理 1 小時前的使用紀錄（滑動視窗）
+    ///   2. 若當前 1 小時內使用量達到安全上限（上限 - BUFFER），等待到最早那筆滿 1 小時
+    ///   3. 等待結束後重試，直到可用
     ///   4. 回傳 Ok（實際計數由 mark_request_used() 在成功請求後累加）
     pub async fn acquire(&self) -> Result<(), RateLimitWaiting> {
         let safe_limit = FINMIND_RATE_LIMIT_PER_HOUR - FINMIND_RATE_LIMIT_BUFFER;
-        let current = self.request_counter.load(Ordering::Relaxed);
+        loop {
+            let maybe_wait_duration = {
+                let mut timestamps = self.usage_timestamps.lock().await;
+                let now = Instant::now();
+                let window = Duration::from_secs(3_600);
 
-        // 取得當前的 UTC 時間
-        let now = Utc::now();
+                while let Some(oldest) = timestamps.front() {
+                    if now.duration_since(*oldest) >= window {
+                        timestamps.pop_front();
+                    } else {
+                        break;
+                    }
+                }
 
-        // 使用 window_start (這裡我們改存目前是「幾點」，借用原本的 Mutex)
-        // 為了不大幅改動你的 struct，我們可以比對 current_hour
-        // 實作上更好的方式是將 struct 裡的 window_start 改為 last_reset_hour: Mutex<u32>
+                if timestamps.len() < safe_limit as usize {
+                    None
+                } else {
+                    timestamps.front().map(|oldest| {
+                        let release_time = *oldest + window;
+                        release_time.saturating_duration_since(now)
+                    })
+                }
+            };
 
-        // 簡化版的整點重置檢查邏輯：
-        // 每當經過整點，就清空計數器
-        // 由於我們不能輕易改變你 struct 裡面的定義，最直接的作法是算出「距離下個整點還有幾秒」
+            if let Some(wait_duration) = maybe_wait_duration {
+                let resume_instant = Instant::now() + wait_duration;
+                {
+                    let mut resume_at = self.resume_at.lock().await;
+                    *resume_at = Some(resume_instant);
+                }
 
-        let minutes = now.minute();
-        let seconds = now.second();
-        let seconds_until_next_hour = 3600 - (minutes * 60 + seconds);
-
-        // 如果計數器達到上限，就「睡到下一個整點」
-        if current >= safe_limit {
-            let wait_duration = Duration::from_secs(seconds_until_next_hour as u64);
-            let resume_instant = Instant::now() + wait_duration;
-
-            {
-                let mut resume_at = self.resume_at.lock().await;
-                *resume_at = Some(resume_instant);
+                tokio::time::sleep(wait_duration).await;
+                {
+                    let mut resume_at = self.resume_at.lock().await;
+                    *resume_at = None;
+                }
+                continue;
             }
 
-            tracing::warn!(
-                used = current,
-                limit = FINMIND_RATE_LIMIT_PER_HOUR,
-                wait_secs = seconds_until_next_hour,
-                "FinMind rate limit reached, waiting until the top of the hour"
-            );
-
-            // 等待直到下個整點
-            tokio::time::sleep(wait_duration).await;
-
-            // 整點到了，完全重置
-            self.request_counter.store(0, Ordering::Relaxed);
-            {
-                let mut resume_at = self.resume_at.lock().await;
-                *resume_at = None;
-            }
-
-            tracing::info!("FinMind rate limit wait complete (top of the hour), resuming");
+            break;
         }
 
         Ok(())
     }
 
     /// 在確認請求有效送出後呼叫，累加本地使用量統計。
-    pub fn mark_request_used(&self) {
-        self.request_counter.fetch_add(1, Ordering::Relaxed);
+    pub async fn mark_request_used(&self) {
+        let mut timestamps = self.usage_timestamps.lock().await;
+        timestamps.push_back(Instant::now());
     }
 }
 
@@ -223,9 +224,9 @@ mod tests {
     #[tokio::test]
     async fn test_acquire_increments_counter() {
         let limiter = FinMindRateLimiter::new(ApiTier::Free);
-        assert_eq!(limiter.used_this_hour(), 0);
+        assert_eq!(limiter.used_this_hour().await, 0);
         limiter.acquire().await.unwrap();
-        assert_eq!(limiter.used_this_hour(), 1);
+        assert_eq!(limiter.used_this_hour().await, 0);
     }
 
     #[tokio::test]

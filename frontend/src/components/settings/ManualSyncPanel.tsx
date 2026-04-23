@@ -12,7 +12,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSymbols } from '@/src/hooks'
-import { useCancelSync, useTriggerSync, useSyncStatus } from '@/src/hooks/useManualSync'
+import { useCancelSync, useRateLimitInfo, useTriggerSync, useSyncStatus } from '@/src/hooks/useManualSync'
 import { useAppStore } from '@/src/store/useAppStore'
 import { Card, Button, ErrorToast } from '@/src/components/ui'
 import { SymbolSearchInput } from './SymbolSearchInput'
@@ -53,6 +53,7 @@ export function ManualSyncPanel() {
   const triggerSync = useTriggerSync()
   const cancelSync = useCancelSync()
   const syncStatus = useSyncStatus()
+  const rateLimitInfo = useRateLimitInfo()
 
   // ── 狀態機 ──────────────────────────────────────────────────────────────────
   const currentStatus = syncStatus.data?.status ?? null
@@ -63,6 +64,10 @@ export function ManualSyncPanel() {
     triggerSync.error instanceof ApiErrorException &&
     triggerSync.error.httpStatus === 409 &&
     triggerSync.error.errorCode === 'SYNC_ALREADY_RUNNING'
+  const displayRateLimit = syncStatus.data?.rate_limit ?? rateLimitInfo.data
+  const remainingApiCalls = displayRateLimit
+    ? Math.max(displayRateLimit.used_this_hour, 0)
+    : null
 
   // ── 股票選擇操作 ─────────────────────────────────────────────────────────────
 
@@ -142,6 +147,17 @@ export function ManualSyncPanel() {
   return (
     <Card>
       <h3 className="text-sm font-semibold text-slate-200 mb-5">資料同步</h3>
+
+      {displayRateLimit && (
+        <div className="mb-4 rounded-lg border border-surface-border bg-surface-card/40 px-3 py-2.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-400">FinMind API 剩餘次數（每 30 秒更新）</span>
+            <span className="font-mono text-slate-200">
+              {remainingApiCalls} / {displayRateLimit.limit_per_hour} 次
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* 執行中：進度顯示 */}
       {isRunning && syncStatus.data && (
