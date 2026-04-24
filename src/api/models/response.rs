@@ -1,6 +1,6 @@
 use crate::api::models::enums::ObservabilityStatus;
 use crate::api::models::{FetchSource, HealthStatus, ReliabilityLevel, SignalSource};
-use crate::models::{IndicatorValue, Interval, SignalType};
+use crate::models::{Interval, SignalType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -19,7 +19,7 @@ pub struct CandleResponse {
     pub volume: u64,
     /// 動態指標結果，key 為指標名稱（如 "ma20"、"rsi14"、"macd"）
     #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub indicators: HashMap<String, IndicatorValue>,
+    pub indicators: HashMap<String, serde_json::Value>,
 }
 
 /// GET /api/v1/candles/{symbol} 的完整 response

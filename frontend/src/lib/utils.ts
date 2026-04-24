@@ -1,6 +1,3 @@
-import type { CandleItem } from '@/src/types/api.generated'
-import { Time } from 'lightweight-charts'
-
 // ── Date / Time ───────────────────────────────────────────────────────────────
 
 export function formatTimestamp(ms: number): string {
@@ -56,44 +53,6 @@ export function formatCapital(value: number): string {
         currency: 'TWD',
         minimumFractionDigits: 0,
     }).format(value)
-}
-
-// ── TradingView Format Conversion ─────────────────────────────────────────────
-
-export interface TradingViewCandle {
-    time: Time   // seconds (UTCTimestamp)
-    open: number
-    high: number
-    low: number
-    close: number
-}
-
-export interface TradingViewVolume {
-    time: Time
-    value: number
-    color: string
-}
-
-/** Convert API candle (ms) to TradingView format (seconds) */
-export function toTradingViewCandle(candle: CandleItem): TradingViewCandle {
-    return {
-        time: (candle.timestamp_ms / 1000) as Time,
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-    }
-}
-
-export function toTradingViewVolume(candle: CandleItem, colorMode: 'TW' | 'US'): TradingViewVolume {
-    const isUp = candle.close >= candle.open
-    const upColor = colorMode === 'TW' ? 'rgba(239,68,68,0.4)' : 'rgba(16,185,129,0.4)'
-    const downColor = colorMode === 'TW' ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'
-    return {
-        time: (candle.timestamp_ms / 1000) as Time,
-        value: candle.volume,
-        color: isUp ? upColor : downColor,
-    }
 }
 
 // ── ID Generation ─────────────────────────────────────────────────────────────

@@ -49,6 +49,7 @@ export function ManualSyncPanel() {
   const [fromDate, setFromDate] = useState(defaultFromStr);  // e.g. "2020-01-01"
   const [toDate, setToDate] = useState(defaultToStr);        // e.g. "2026-04-23"
   const [interval, setInterval] = useState<'1m' | '5m' | '15m' | '1h' | '4h' | '1d'>('1d')
+  const [allSymbolsMode, setAllSymbolsMode] = useState(false)
 
   // ── 單一 useSymbols 呼叫，allSymbols 往下傳 ────────────────────────────────
   const {
@@ -74,9 +75,7 @@ export function ManualSyncPanel() {
     triggerSync.error.httpStatus === 409 &&
     triggerSync.error.errorCode === 'SYNC_ALREADY_RUNNING'
   const displayRateLimit = syncStatus.data?.rate_limit ?? rateLimitInfo.data
-  const remainingApiCalls = displayRateLimit
-    ? Math.max(displayRateLimit.used_this_hour, 0)
-    : null
+  const remainingApiCalls = displayRateLimit ? Math.max(displayRateLimit.used_this_hour, 0) : null
 
   // ── 股票選擇操作 ─────────────────────────────────────────────────────────────
 
@@ -95,11 +94,15 @@ export function ManualSyncPanel() {
   }
 
   function handleSelect(symbol: SymbolItem) {
+    setAllSymbolsMode(false)
+
     if (selected.some((s) => s.symbol === symbol.symbol)) return
     setSelected((prev) => [...prev, symbol])
   }
 
   function handleSelectManualSymbol(symbolCode: string) {
+    setAllSymbolsMode(false)
+
     const symbol = symbolCode.trim()
     if (!symbol || selected.some((s) => s.symbol === symbol)) return
 
@@ -112,6 +115,8 @@ export function ManualSyncPanel() {
   }
 
   function handleSelectTop10() {
+    setAllSymbolsMode(false)
+
     const top10 = TOP_10_SYMBOLS
       .map((code) => allSymbols.find((s) => s.symbol === code) ?? makeFallbackSymbol(code))
     const toAdd = top10.filter(
@@ -125,18 +130,21 @@ export function ManualSyncPanel() {
 
   function handleClearAll() {
     setSelected([])
+    setAllSymbolsMode(false)
   }
 
   // ── 開始同步 ─────────────────────────────────────────────────────────────────
 
   function handleStartSync() {
-    if (selected.length === 0) return
+    if (!allSymbolsMode && selected.length === 0) return
     if (!fullSync && (!fromDate || !toDate)) return
 
     triggerSync.mutate({
-      symbols: selected.map((s) => s.symbol),
+      mode: allSymbolsMode ? 'all' : 'partial',
+      // 讓後端判斷 undefined 為「全部」
+      symbols: allSymbolsMode ? undefined : selected.map((s) => s.symbol),
       fullSync,
-      fromDate: fullSync ? fromDate : fromDate,
+      fromDate,
       toDate: fullSync ? undefined : toDate,
       intervals: fullSync ? undefined : [interval],
     })
@@ -215,7 +223,19 @@ export function ManualSyncPanel() {
               前 10 大市值
             </button>
 
-            {selected.length > 0 && (
+            <button
+              onClick={() => {
+                setAllSymbolsMode(true)
+                setSelected([])
+              }}
+              disabled={symbolsLoading || allSymbols.length === 0}
+              className="text-xs px-2.5 py-1 rounded-lg bg-surface border border-surface-border
+             text-slate-400 hover:text-slate-200 hover:bg-surface-hover"
+            >
+              全部股票（DB）
+            </button>
+
+            {(selected.length > 0 || allSymbolsMode) && (
               <button
                 onClick={handleClearAll}
                 className="text-xs px-2.5 py-1 rounded-lg text-slate-600
@@ -246,12 +266,20 @@ export function ManualSyncPanel() {
           {/* 已選標籤 */}
           <div>
             <div className="text-xs text-slate-500 mb-2">
-              已選擇（{selected.length} 檔）
+              {allSymbolsMode
+                ? `已選擇：全部股票（${allSymbols.length} 檔）`
+                : `已選擇（${selected.length} 檔）`}
             </div>
-            <SelectedSymbolTags
-              selected={selected}
-              onRemove={handleRemove}
-            />
+            {allSymbolsMode ? (
+              <div className="text-xs text-slate-400">
+                已選擇全部股票（不顯示列表）
+              </div>
+            ) : (
+              <SelectedSymbolTags
+                selected={selected}
+                onRemove={handleRemove}
+              />
+            )}
           </div>
 
           {/* 開始同步按鈕 */}
@@ -301,15 +329,17 @@ export function ManualSyncPanel() {
           <Button
             onClick={handleStartSync}
             loading={triggerSync.isPending}
-            disabled={selected.length === 0 || symbolsLoading || (!fullSync && (!fromDate || !toDate))}
+            disabled={(!allSymbolsMode && selected.length === 0) || symbolsLoading || (!fullSync && (!fromDate || !toDate))}
             size="lg"
             className="w-full"
           >
             {triggerSync.isPending
               ? '準備中...'
-              : selected.length === 0
-                ? '請先選擇股票'
-                : `開始同步（${selected.length} 檔）`}
+              : allSymbolsMode
+                ? `開始同步（全部 ${allSymbols.length} 檔）`
+                : selected.length === 0
+                  ? '請先選擇股票'
+                  : `開始同步（${selected.length} 檔）`}
           </Button>
 
           {/* 預估提示：只在有選擇且 API 有資料時顯示 */}
@@ -320,16 +350,19 @@ export function ManualSyncPanel() {
             </p>
           )}
         </div>
-      )}
+      )
+      }
 
       {/* trigger sync 錯誤提示 */}
-      {triggerSync.isError && !isSyncConflictError && (
-        <ErrorToast
-          error={triggerSync.error}
-          onRetry={handleStartSync}
-          onRedirect={router.push}
-        />
-      )}
-    </Card>
+      {
+        triggerSync.isError && !isSyncConflictError && (
+          <ErrorToast
+            error={triggerSync.error}
+            onRetry={handleStartSync}
+            onRedirect={router.push}
+          />
+        )
+      }
+    </Card >
   )
 }

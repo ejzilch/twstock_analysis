@@ -62,18 +62,20 @@ export function useTriggerSync() {
     ManualSyncAcceptedResponse,
     Error,
     {
-      symbols: string[]
+      mode: 'all' | 'partial'
+      symbols?: string[]
       fullSync: boolean
       fromDate?: string
       toDate?: string
       intervals?: string[]
     }
   >({
-    mutationFn: ({ symbols, fullSync, fromDate, toDate, intervals }) =>
+    mutationFn: ({ mode, symbols, fullSync, fromDate, toDate, intervals }) =>
       apiClient<ManualSyncAcceptedResponse>(buildAdminSyncPath('/admin/sync'), {
         method: 'POST',
         body: JSON.stringify({
           request_id: generateRequestId(),
+          mode,
           symbols,
           full_sync: fullSync,
           from_date: fullSync ? undefined : fromDate,
