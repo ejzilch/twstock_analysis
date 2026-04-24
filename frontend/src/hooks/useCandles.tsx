@@ -27,7 +27,7 @@ export function useCandles(params: UseCandlesParams) {
     })
 
     return useQuery<CandlesResponse>({
-        queryKey: ['candles', params.symbol, params.interval, params.from_ms, params.to_ms],
+        queryKey: ['candles', params.symbol, params.interval, params.from_ms, params.to_ms, params.indicators],
         queryFn: () => apiClient<CandlesResponse>(`/api/v1/candles/${params.symbol}${qs}`),
         staleTime: 25_000,
         gcTime: 5 * 60_000,

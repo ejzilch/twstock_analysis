@@ -1,13 +1,10 @@
 'use client'
-/**
- * BacktestChart — K-line chart with signal overlay for backtest result page.
- * Uses cursor pagination to load candles in batches (respects 2000-bar limit).
- */
 import { useState, useEffect } from 'react'
 import { apiClient, buildQueryString } from '@/src/lib/api-client'
 import { CandleChart } from '@/src/components/charts/CandleChart'
 import { Card, LoadingSpinner, ErrorToast, Button } from '@/src/components/ui'
 import type { CandleItem, SignalItem, CandlesResponse } from '@/src/types/api.generated'
+import { IndicatorToggle } from '@/src/components/charts/IndicatorToggle'
 
 interface BacktestChartProps {
     symbol: string
@@ -118,6 +115,7 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
     const [hasMore, setHasMore] = useState(false)
     const [cursor, setCursor] = useState<string | null>(null)
     const [loadingMore, setLoadingMore] = useState(false)
+    const [visibleIndicators, setVisibleIndicators] = useState<Set<string>>(new Set())
 
     // Initial load
     useEffect(() => {
@@ -129,7 +127,7 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
         setError(null)
 
         apiClient<CandlesResponse>(
-            `/api/v1/candles/${symbol}${buildQueryString({ from_ms, to_ms, interval: '1d' })}`
+            `/api/v1/candles/${symbol}${buildQueryString({ from_ms, to_ms, interval: '1d', indicators: 'ma5,ma20,ma50,bollinger', })}`
         )
             .then((candlesRes) => {
                 setCandles(candlesRes.candles)
@@ -139,7 +137,7 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
             })
             .catch(setError)
             .finally(() => setLoading(false))
-    }, [symbol, strategyName, from_ms, to_ms])
+    }, [symbol, strategyName, from_ms, to_ms, visibleIndicators])
 
     // Load next page via cursor pagination
     async function loadMore() {
@@ -147,7 +145,7 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
         setLoadingMore(true)
         try {
             const res = await apiClient<CandlesResponse>(
-                `/api/v1/candles/${symbol}${buildQueryString({ from_ms, to_ms, interval: '1d', cursor })}`
+                `/api/v1/candles/${symbol}${buildQueryString({ from_ms, to_ms, interval: '1d', cursor, indicators: 'ma5,ma20,ma50,bollinger', })}`
             )
             setCandles((prev) => {
                 const merged = [...prev, ...res.candles]
@@ -188,10 +186,23 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
                 <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">
                     {symbol} · 回測期間 K 線
                 </span>
-                <span className="text-xs text-slate-600">{candles.length} 根</span>
+                <div className="flex items-center gap-3">
+                    <IndicatorToggle
+                        visible={visibleIndicators}
+                        onChange={setVisibleIndicators}
+                    />
+                    <span className="text-xs text-slate-600">{candles.length} 根</span>
+                </div>
             </div>
 
-            <CandleChart candles={candles} signals={signals} height={200} showVolume={false} markerTextMode="signalOnly" />
+            <CandleChart
+                candles={candles}
+                signals={signals}
+                height={200}
+                showVolume={false}
+                markerTextMode="signalOnly"
+                visibleIndicators={visibleIndicators}
+            />
 
             {hasMore && (
                 <div className="px-4 py-3 border-t border-surface-border flex justify-center">

@@ -1,3 +1,4 @@
+use crate::api::models::SyncMode;
 use crate::models::enums::Interval;
 
 use serde::{Deserialize, Serialize};
@@ -10,8 +11,11 @@ pub struct ManualSyncRequest {
     /// 冪等性識別碼，由前端產生
     pub request_id: String,
 
+    /// 冪等性識別碼，由前端產生
+    pub mode: Option<SyncMode>,
+
     /// 要同步的股票代號清單，至少 1 檔
-    pub symbols: Vec<String>,
+    pub symbols: Option<Vec<String>>,
 
     /// 是否全量回補（true: 忽略 from/to）
     pub full_sync: Option<bool>,

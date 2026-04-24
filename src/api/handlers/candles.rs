@@ -4,7 +4,9 @@ use crate::api::models::request::CandlesQueryParams;
 use crate::api::models::response::{CandleResponse, CandlesApiResponse};
 use crate::app_state::AppState;
 use crate::constants::CANDLES_MAX_PER_REQUEST;
-use crate::models::Interval;
+use crate::core::indicators::factory::IndicatorFactory;
+use crate::models::indicators::{BollingerConfig, IndicatorConfig};
+use crate::models::{Candle, IndicatorValue, Interval};
 use axum::{
     extract::{Path, Query, State},
     Json,
@@ -39,17 +41,59 @@ pub async fn candles_handler(
     }
 
     // 嘗試從 Redis 取快取
-    let (candles, source, cached) =
+    let (mut candles_response, source, cached) =
         fetch_candles_with_cache(&state, &symbol, interval, params.from_ms, params.to_ms).await?;
 
-    let count = candles.len();
+    // ── 指標計算: 直接使用既有的 IndicatorFactory ────────────────────────────────
+    if let Some(indicator_str) = &params.indicators {
+        if !indicator_str.trim().is_empty() {
+            let indicator_request = parse_indicator_request(indicator_str);
+
+            if !indicator_request.is_empty() {
+                // 把 CandleResponse 轉成 factory 需要的 Candle 格式
+                let candles_for_calc: Vec<Candle> = candles_response
+                    .iter()
+                    .map(|c| Candle {
+                        symbol: symbol.clone(),
+                        interval,
+                        timestamp_ms: c.timestamp_ms,
+                        open: c.open,
+                        high: c.high,
+                        low: c.low,
+                        close: c.close,
+                        volume: c.volume as u64,
+                        indicators: Default::default(),
+                    })
+                    .collect();
+
+                match IndicatorFactory::build_from_request(&indicator_request) {
+                    Ok(factory) => {
+                        match factory.compute_all(&candles_for_calc) {
+                            Ok((computed, _)) => {
+                                // 把計算結果填回 CandleResponse 的 indicators HashMap
+                                apply_indicators_to_candles(&mut candles_response, &computed);
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "Indicator computation failed, returning candles without indicators");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to build indicator factory");
+                    }
+                }
+            }
+        }
+    }
+
+    let count = candles_response.len();
 
     Ok(Json(CandlesApiResponse {
         symbol: symbol.clone(),
         interval: interval,
         from_ms: params.from_ms,
         to_ms: params.to_ms,
-        candles,
+        candles: candles_response,
         count,
         total_available,
         next_cursor: None, // cursor 分頁於此版本以 total_available 限制取代
@@ -192,4 +236,96 @@ async fn fetch_candles_from_db(
             indicators: HashMap::new(),
         })
         .collect())
+}
+
+/// 把 "ma5,ma20,ma50,rsi,macd,bollinger" 解析成 IndicatorFactory 需要的 HashMap
+fn parse_indicator_request(indicator_str: &str) -> HashMap<String, IndicatorConfig> {
+    let mut map: HashMap<String, IndicatorConfig> = HashMap::new();
+    let mut ma_periods: Vec<u32> = vec![];
+
+    for key in indicator_str.split(',').map(|s| s.trim()) {
+        match key {
+            "ma5" => ma_periods.push(5),
+            "ma20" => ma_periods.push(20),
+            "ma50" => ma_periods.push(50),
+            "rsi" => {
+                map.insert("rsi".to_string(), IndicatorConfig::Periods(vec![14]));
+            }
+            "macd" => {
+                map.insert(
+                    "macd".to_string(),
+                    IndicatorConfig::Periods(vec![12, 26, 9]),
+                );
+            }
+            "bollinger" => {
+                map.insert(
+                    "bollinger".to_string(),
+                    IndicatorConfig::Bollinger(BollingerConfig {
+                        period: 20,
+                        std_dev_multiplier: 2.0,
+                    }),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    if !ma_periods.is_empty() {
+        map.insert("ma".to_string(), IndicatorConfig::Periods(ma_periods));
+    }
+
+    map
+}
+
+fn apply_indicators_to_candles(
+    candles: &mut Vec<CandleResponse>,
+    computed: &HashMap<String, Vec<IndicatorValue>>,
+) {
+    for (key, values) in computed {
+        // Bollinger 的 values 是 [upper0, mid0, lower0, upper1, mid1, lower1, ...]
+        // 三個 Scalar 為一組，對應一根 K 棒
+        let is_bollinger = key == "bollinger";
+
+        if is_bollinger {
+            let groups = values.chunks(3);
+            for (i, chunk) in groups.enumerate() {
+                if i >= candles.len() || chunk.len() < 3 {
+                    break;
+                }
+                let (u, m, l) = match (&chunk[0], &chunk[1], &chunk[2]) {
+                    (
+                        IndicatorValue::Scalar(u),
+                        IndicatorValue::Scalar(m),
+                        IndicatorValue::Scalar(l),
+                    ) if !u.is_nan() => (*u, *m, *l),
+                    _ => continue,
+                };
+                candles[i].indicators.insert(
+                    key.clone(),
+                    serde_json::json!({
+                        "upper": u, "middle": m, "lower": l,
+                    }),
+                );
+            }
+            continue;
+        }
+
+        // MA、RSI：單一 Scalar
+        // MACD：MacdValue
+        for (i, value) in values.iter().enumerate() {
+            if i >= candles.len() {
+                break;
+            }
+            let json_val = match value {
+                IndicatorValue::Scalar(v) if !v.is_nan() => serde_json::json!(v),
+                IndicatorValue::Macd(m) if !m.macd_line.is_nan() => serde_json::json!({
+                    "macd_line":   m.macd_line,
+                    "signal_line": m.signal_line,
+                    "histogram":   m.histogram,
+                }),
+                _ => continue,
+            };
+            candles[i].indicators.insert(key.clone(), json_val);
+        }
+    }
 }

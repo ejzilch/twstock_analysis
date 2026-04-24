@@ -111,6 +111,16 @@ impl std::fmt::Display for FetchSource {
     }
 }
 
+/// 同步模式
+///
+/// 用於 GET /api/v1//admin/sync response 的 mode 欄位，
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SyncMode {
+    All,
+    Partial,
+}
+
 // ── 單元測試 ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -1,5 +1,3 @@
-/// src/api/handlers/admin_sync.rs
-///
 /// 手動同步 API handler（修正版）。
 ///
 /// 修正清單：
@@ -25,6 +23,7 @@ use crate::api::models::admin_sync::{
     ManualSyncAcceptedResponse, ManualSyncRequest, RateLimitInfo, SyncStatus, SyncStatusResponse,
     SyncSummary,
 };
+use crate::api::models::SyncMode;
 use crate::app_state::AppState;
 use crate::constants::{
     ERROR_SYNC_ALREADY_RUNNING, ERROR_SYNC_NOT_FOUND, FINMIND_RATE_LIMIT_BUFFER,
@@ -43,20 +42,48 @@ pub async fn trigger_manual_sync(
     Json(body): Json<ManualSyncRequest>,
 ) -> impl IntoResponse {
     // 驗證請求
-    if body.symbols.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error_code": "INVALID_REQUEST",
-                "message":    "symbols must not be empty",
-                "fallback_available": false,
-                "timestamp_ms": current_timestamp_ms(),
-                "request_id": body.request_id,
-            })),
-        )
-            .into_response();
-    }
+    let mode = body.mode.unwrap_or(SyncMode::Partial);
 
+    let target_symbols: Vec<String> = match mode {
+        SyncMode::All => match get_all_symbols_from_db(&state.db_pool).await {
+            Ok(list) => list,
+            Err(e) => {
+                error!(error = %e, "Failed to load symbols from DB");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error_code": "INTERNAL_ERROR",
+                        "message": "Failed to load symbols",
+                        "fallback_available": false,
+                        "timestamp_ms": current_timestamp_ms(),
+                        "request_id": body.request_id,
+                    })),
+                )
+                    .into_response();
+            }
+        },
+        SyncMode::Partial => {
+            let symbols = match &body.symbols {
+                Some(s) if !s.is_empty() => s.clone(),
+                _ => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({
+                            "error_code": "INVALID_REQUEST",
+                            "message": "symbols must not be empty",
+                            "fallback_available": false,
+                            "timestamp_ms": current_timestamp_ms(),
+                            "request_id": body.request_id,
+                        })),
+                    )
+                        .into_response();
+                }
+            };
+            symbols
+        }
+    };
+
+    let symbols = target_symbols;
     let full_sync = body.full_sync.unwrap_or(true);
     let today = Local::now().date_naive();
     let five_years_ago = today
@@ -172,11 +199,11 @@ pub async fn trigger_manual_sync(
     let started_at_ms = current_timestamp_ms();
 
     // 預估請求次數與時間
-    let estimated_requests = estimate_requests(&body.symbols);
+    let estimated_requests = estimate_requests(&symbols);
     let estimated_hours = estimate_hours(estimated_requests);
 
     // 建立初始狀態並存入 Redis
-    let initial_state = SyncState::new(sync_id.clone(), body.symbols.clone(), started_at_ms);
+    let initial_state = SyncState::new(sync_id.clone(), symbols.clone(), started_at_ms);
     {
         let mut redis = state.redis_client.clone();
         if let Err(e) = save_sync_state(&mut redis, &initial_state).await {
@@ -202,7 +229,7 @@ pub async fn trigger_manual_sync(
             sync_id: sync_id.clone(),
             sync_type: "manual".to_string(),
             triggered_by: "ej".to_string(),
-            symbols: body.symbols.clone(),
+            symbols: symbols.clone(),
         },
         started_at_ms,
     )
@@ -218,7 +245,7 @@ pub async fn trigger_manual_sync(
     let rate_limiter = state.rate_limiter.clone();
     let redis_clone = state.redis_client.clone();
     let sync_id_bg = sync_id.clone();
-    let symbols_bg = body.symbols.clone();
+    let symbols_bg = symbols.clone();
     let scope_bg = scope.clone();
 
     tokio::spawn(async move {
@@ -236,7 +263,7 @@ pub async fn trigger_manual_sync(
 
     info!(
         sync_id            = %sync_id,
-        symbols            = ?body.symbols,
+        symbols            = ?symbols,
         estimated_requests = estimated_requests,
         estimated_hours    = estimated_hours,
         "Manual sync accepted, background task started"
@@ -248,7 +275,7 @@ pub async fn trigger_manual_sync(
             serde_json::to_value(ManualSyncAcceptedResponse {
                 sync_id,
                 status: SyncStatus::Running,
-                symbols: body.symbols,
+                symbols: symbols,
                 estimated_requests,
                 estimated_hours,
                 started_at_ms,
@@ -523,6 +550,21 @@ async fn fetch_final_sync_state(
             total_failed: row.total_failed,
         },
     }))
+}
+
+pub async fn get_all_symbols_from_db(db: &PgPool) -> Result<Vec<String>, BridgeError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT symbol
+        FROM symbols
+        WHERE is_active = true
+        "#
+    )
+    .fetch_all(db)
+    .await
+    .map_err(|e| BridgeError::from_db("get_all_symbols failed", e))?;
+
+    Ok(rows.into_iter().map(|r| r.symbol).collect())
 }
 
 // ── 工具函數 ──────────────────────────────────────────────────────────────────

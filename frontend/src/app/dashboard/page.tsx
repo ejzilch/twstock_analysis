@@ -5,6 +5,7 @@ import { clsx } from 'clsx'
 import { useCandles, useSignals } from '@/src/hooks'
 import { useAppStore } from '@/src/store/useAppStore'
 import { CandleChart, IndicatorPane } from '@/src/components/charts'
+import { IndicatorToggle } from '@/src/components/charts/IndicatorToggle'
 import {
     SymbolSelector,
     IntervalSelector,
@@ -78,6 +79,8 @@ export default function DashboardPage() {
     const symbol = useAppStore((s) => s.selectedSymbol)
     const interval = useAppStore((s) => s.selectedInterval)
     const { selectedRange, setSelectedRange, from_ms, to_ms } = useTimeRange(interval)
+    const ALL_INDICATORS = new Set(['ma5', 'ma20', 'ma50', 'bollinger'])
+    const [visibleIndicators, setVisibleIndicators] = useState<Set<string>>(ALL_INDICATORS)
 
     const candlesQuery = useCandles({
         symbol, interval, from_ms, to_ms,
@@ -88,7 +91,7 @@ export default function DashboardPage() {
     const candles = candlesQuery.data?.candles ?? []
     const signals = signalsQuery.data?.signals ?? []
     const isLoading = candlesQuery.isLoading
-    const hasRsi = candles.some((c: any) => c.indicators?.['rsi'] != null)
+    const hasRsi = candles.some((c: any) => c.indicators?.['rsi14'] != null)
     const hasMacd = candles.some((c: any) => c.indicators?.['macd'] != null)
 
     const showLatencyBanner =
@@ -154,21 +157,20 @@ export default function DashboardPage() {
                                     <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">
                                         {symbol} · {interval.toUpperCase()}
                                     </span>
-                                    <div className="flex items-center gap-3 text-xs">
-                                        {showLatencyBanner && (
-                                            <span className="text-amber-500 flex items-center gap-1">
-                                                <span>⚠</span> 資料可能延遲
-                                            </span>
-                                        )}
-                                        <span className="text-slate-600">{candles.length} 根 K 線</span>
+                                    <div className="flex items-center gap-4">
+                                        <IndicatorToggle
+                                            visible={visibleIndicators}
+                                            onChange={setVisibleIndicators}
+                                        />
+                                        <span className="text-slate-600 text-xs">{candles.length} 根 K 線</span>
                                     </div>
                                 </div>
-                                <CandleChart candles={candles} signals={signals} height={500} />
+                                <CandleChart candles={candles} signals={signals} height={500} visibleIndicators={visibleIndicators} />
                             </Card>
 
                             {hasRsi && (
                                 <Card padding={false} className="overflow-hidden">
-                                    <IndicatorPane candles={candles} type="rsi" />
+                                    <IndicatorPane candles={candles} type="rsi14" />
                                 </Card>
                             )}
 
