@@ -2,7 +2,7 @@
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { clsx } from 'clsx'
-import { useCandles, useSignals } from '@/src/hooks'
+import { useCandles, useSignals, useChartSync } from '@/src/hooks'
 import { useAppStore } from '@/src/store/useAppStore'
 import { CandleChart, IndicatorPane } from '@/src/components/charts'
 import { IndicatorToggle } from '@/src/components/charts/IndicatorToggle'
@@ -75,6 +75,7 @@ function isDataSourceError(error: unknown): boolean {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
+    const chartSync = useChartSync()
     const router = useRouter()
     const symbol = useAppStore((s) => s.selectedSymbol)
     const interval = useAppStore((s) => s.selectedInterval)
@@ -165,18 +166,32 @@ export default function DashboardPage() {
                                         <span className="text-slate-600 text-xs">{candles.length} 根 K 線</span>
                                     </div>
                                 </div>
-                                <CandleChart candles={candles} signals={signals} height={500} visibleIndicators={visibleIndicators} />
+                                <CandleChart
+                                    candles={candles}
+                                    signals={signals}
+                                    height={500}
+                                    visibleIndicators={visibleIndicators}
+                                    sync={chartSync}
+                                />
                             </Card>
 
                             {hasRsi && (
                                 <Card padding={false} className="overflow-hidden">
-                                    <IndicatorPane candles={candles} type="rsi14" />
+                                    <IndicatorPane
+                                        candles={candles}
+                                        type="rsi14"
+                                        sync={chartSync}
+                                    />
                                 </Card>
                             )}
 
                             {hasMacd && (
                                 <Card padding={false} className="overflow-hidden">
-                                    <IndicatorPane candles={candles} type="macd" />
+                                    <IndicatorPane
+                                        candles={candles}
+                                        type="macd"
+                                        sync={chartSync}
+                                    />
                                 </Card>
                             )}
                         </>
