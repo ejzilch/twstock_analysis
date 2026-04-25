@@ -50,6 +50,9 @@ export function CandleChart({
     })
     const colorMode = useAppStore((s) => s.colorMode)
 
+    // 記錄是否已對齊過
+    const hasAlignedRef = useRef(false)
+
     // ── 橋梁 state：Effect 1 完成後設為 true，通知 Effect 2 可以執行 ──────────
     const [chartReady, setChartReady] = useState(false)
 
@@ -86,7 +89,10 @@ export function CandleChart({
                     horzLines: { color: CHART_THEME.gridLine },
                 },
                 crosshair: { mode: CrosshairMode.Magnet },
-                rightPriceScale: { borderColor: CHART_THEME.borderColor },
+                rightPriceScale: {
+                    borderColor: CHART_THEME.borderColor,
+                    minimumWidth: 80,
+                },
                 timeScale: {
                     borderColor: CHART_THEME.borderColor,
                     timeVisible: true,
@@ -116,6 +122,7 @@ export function CandleChart({
                 })
                 chart.priceScale('volume').applyOptions({
                     scaleMargins: { top: 0.85, bottom: 0 },
+                    minimumWidth: 80,
                 })
             }
 
@@ -135,6 +142,7 @@ export function CandleChart({
         })
 
         return () => {
+            hasAlignedRef.current = false
             isMounted = false
             resizeObserver?.disconnect()
             if (chartRef.current && sync) sync.unregister(chartRef.current)
@@ -223,6 +231,11 @@ export function CandleChart({
                 color: isUp ? upVolume : downVolume,
             }
         }))
+
+        if (!hasAlignedRef.current && sync) {
+            hasAlignedRef.current = true
+            sync.alignRight()
+        }
 
     }, [chartReady, candles, signals, visibleIndicators, colorMode, markerTextMode])
 

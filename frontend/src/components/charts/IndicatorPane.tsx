@@ -15,7 +15,7 @@ interface IndicatorPaneProps {
 
 export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
     const containerRef = useRef<HTMLDivElement>(null)
-    const height = type === 'rsi14' ? 100 : 120
+    const height = type === 'rsi14' ? 160 : 180
 
     useEffect(() => {
         if (!containerRef.current || candles.length === 0) return
@@ -30,7 +30,11 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
                 height,
                 layout: { background: { color: '#161b27' }, textColor: '#94a3b8' },
                 grid: { vertLines: { color: '#1e2a3a' }, horzLines: { color: '#1e2a3a' } },
-                rightPriceScale: { borderColor: '#1e2a3a' },
+                rightPriceScale: {
+                    borderColor: '#1e2a3a',
+                    minimumWidth: 80,
+
+                },
                 timeScale: {
                     borderColor: '#1e2a3a',
                     timeVisible: true,
@@ -48,7 +52,11 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
                         value: c.indicators['rsi14'] as number
                     }))
                 )
-                if (sync) sync.register(chart, rsiSeries)
+
+                if (sync) {
+                    sync.register(chart, rsiSeries)
+                    sync.alignRight()
+                }
             } else {
                 const macdLine = chart.addLineSeries({ color: INDICATOR_COLORS.macdLine, lineWidth: 1, priceLineVisible: false })
                 const signalLine = chart.addLineSeries({ color: INDICATOR_COLORS.signal, lineWidth: 1, priceLineVisible: false })
@@ -66,7 +74,11 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
                             INDICATOR_COLORS.histPos : INDICATOR_COLORS.histNeg
                     })
                 })
-                if (sync) sync.register(chart, macdLine)
+
+                if (sync) {
+                    sync.register(chart, macdLine)
+                    sync.alignRight()
+                }
             }
         })
 
