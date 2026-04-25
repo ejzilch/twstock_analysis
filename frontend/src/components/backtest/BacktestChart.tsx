@@ -137,7 +137,7 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
             })
             .catch(setError)
             .finally(() => setLoading(false))
-    }, [symbol, strategyName, from_ms, to_ms, visibleIndicators])
+    }, [symbol, strategyName, from_ms, to_ms])
 
     // Load next page via cursor pagination
     async function loadMore() {
@@ -198,7 +198,7 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
             <CandleChart
                 candles={candles}
                 signals={signals}
-                height={200}
+                height={400}
                 showVolume={false}
                 markerTextMode="signalOnly"
                 visibleIndicators={visibleIndicators}

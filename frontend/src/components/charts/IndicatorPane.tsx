@@ -5,19 +5,22 @@ import { Time } from 'lightweight-charts';
 import {
     INDICATOR_COLORS,
 } from '@/src/constants/chartColors'
+import { ChartSyncHandle } from '@/src/hooks/useChartSync'
 
 interface IndicatorPaneProps {
     candles: CandleItem[]
     type: 'rsi14' | 'macd'
+    sync?: ChartSyncHandle
 }
 
-export function IndicatorPane({ candles, type }: IndicatorPaneProps) {
+export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
     const containerRef = useRef<HTMLDivElement>(null)
     const height = type === 'rsi14' ? 100 : 120
 
     useEffect(() => {
         if (!containerRef.current || candles.length === 0) return
         let chart: ReturnType<typeof import('lightweight-charts')['createChart']> | null = null
+        let resizeObserver: ResizeObserver | null = null
 
         import('lightweight-charts').then(({ createChart }) => {
             if (!containerRef.current) return
@@ -28,14 +31,24 @@ export function IndicatorPane({ candles, type }: IndicatorPaneProps) {
                 layout: { background: { color: '#161b27' }, textColor: '#94a3b8' },
                 grid: { vertLines: { color: '#1e2a3a' }, horzLines: { color: '#1e2a3a' } },
                 rightPriceScale: { borderColor: '#1e2a3a' },
-                timeScale: { borderColor: '#1e2a3a', timeVisible: false, secondsVisible: false },
+                timeScale: {
+                    borderColor: '#1e2a3a',
+                    timeVisible: true,
+                    secondsVisible: false,
+                    rightOffset: 0,
+                },
             })
 
             if (type === 'rsi14') {
                 const rsiSeries = chart.addLineSeries({ color: INDICATOR_COLORS.rsi, lineWidth: 1, priceLineVisible: false })
                 rsiSeries.setData(candles
                     .filter((c) => c.indicators?.['rsi14'] != null)
-                    .map((c) => ({ time: (c.timestamp_ms / 1000) as Time, value: c.indicators['rsi14'] as number })))
+                    .map((c) => ({
+                        time: (c.timestamp_ms / 1000) as Time,
+                        value: c.indicators['rsi14'] as number
+                    }))
+                )
+                if (sync) sync.register(chart, rsiSeries)
             } else {
                 const macdLine = chart.addLineSeries({ color: INDICATOR_COLORS.macdLine, lineWidth: 1, priceLineVisible: false })
                 const signalLine = chart.addLineSeries({ color: INDICATOR_COLORS.signal, lineWidth: 1, priceLineVisible: false })
@@ -46,12 +59,21 @@ export function IndicatorPane({ candles, type }: IndicatorPaneProps) {
                     const t = c.timestamp_ms / 1000
                     macdLine.update({ time: t as Time, value: m.macd_line })
                     signalLine.update({ time: t as Time, value: m.signal_line })
-                    histogram.update({ time: t as Time, value: m.histogram, color: m.histogram >= 0 ? INDICATOR_COLORS.histPos : INDICATOR_COLORS.histNeg })
+                    histogram.update({
+                        time: t as Time,
+                        value: m.histogram,
+                        color: m.histogram >= 0 ?
+                            INDICATOR_COLORS.histPos : INDICATOR_COLORS.histNeg
+                    })
                 })
+                if (sync) sync.register(chart, macdLine)
             }
         })
 
-        return () => { chart?.remove() }
+        return () => {
+            if (chart && sync) sync.unregister(chart)
+            chart?.remove()
+        }
     }, [candles, type, height])
 
     return (
