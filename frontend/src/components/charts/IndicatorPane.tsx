@@ -2,27 +2,36 @@
 import { useEffect, useRef } from 'react'
 import type { CandleItem } from '@/src/types/api.generated'
 import { Time } from 'lightweight-charts';
-import { INDICATOR_COLORS } from '@/src/constants/chartColors'
+import { INDICATOR_COLORS, ColorMode, getMacdRsiColors } from '@/src/constants/chartColors'
 import { ChartSyncHandle } from '@/src/hooks/useChartSync'
 import { RsiTooltip, MacdTooltip } from './ChartTooltip'
+import { useAppStore } from '@/src/store/useAppStore'
 
 interface IndicatorPaneProps {
     candles: CandleItem[]
     type: 'rsi14' | 'macd'
     sync?: ChartSyncHandle
+    colorMode?: ColorMode
 }
 
 export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
+    const colorMode = useAppStore((s) => s.colorMode)
     const containerRef = useRef<HTMLDivElement>(null)
+    const chartRef = useRef<any>(null)
     const height = type === 'rsi14' ? 160 : 180
+    const mc = getMacdRsiColors(colorMode ?? 'TW')
 
     useEffect(() => {
         if (!containerRef.current || candles.length === 0) return
         let chart: ReturnType<typeof import('lightweight-charts')['createChart']> | null = null
         let resizeObserver: ResizeObserver | null = null
+        let isCancelled = false
 
         import('lightweight-charts').then(({ createChart }) => {
-            if (!containerRef.current) return
+            if (isCancelled || !containerRef.current) return
+
+            chartRef.current?.remove()
+            chartRef.current = null
 
             chart = createChart(containerRef.current, {
                 width: containerRef.current.clientWidth,
@@ -41,6 +50,8 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
                 },
             })
 
+            chartRef.current = chart
+
             if (type === 'rsi14') {
                 const rsiSeries = chart.addLineSeries({ color: INDICATOR_COLORS.rsi, lineWidth: 1, priceLineVisible: false })
                 rsiSeries.setData(candles.map((c) => {
@@ -51,8 +62,8 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
                 }));
                 if (sync) sync.register(chart, rsiSeries)
             } else {
-                const macdLine = chart.addLineSeries({ color: INDICATOR_COLORS.macdLine, lineWidth: 1, priceLineVisible: false })
-                const signalLine = chart.addLineSeries({ color: INDICATOR_COLORS.signal, lineWidth: 1, priceLineVisible: false })
+                const macdLine = chart.addLineSeries({ color: mc.macdLine, lineWidth: 1, priceLineVisible: false })
+                const signalLine = chart.addLineSeries({ color: mc.signal, lineWidth: 1, priceLineVisible: false })
                 const histogram = chart.addHistogramSeries({ priceLineVisible: false })
 
                 const macdData: any[] = []
@@ -73,7 +84,7 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
                         histData.push({
                             time: t,
                             value: m.histogram,
-                            color: m.histogram >= 0 ? INDICATOR_COLORS.histPos : INDICATOR_COLORS.histNeg
+                            color: m.histogram >= 0 ? mc.histPos : mc.histNeg
                         })
                     }
                 })
@@ -94,11 +105,13 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
         })
 
         return () => {
+            isCancelled = true
             resizeObserver?.disconnect()
             if (chart && sync) sync.unregister(chart)
-            chart?.remove()
+            chartRef.current?.remove()
+            chartRef.current = null
         }
-    }, [candles, type, height])
+    }, [candles, type, height, colorMode])
 
     return (
         <div className="w-full">
@@ -115,8 +128,8 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
 
                 {/* Fixed top-left overlay tooltip */}
                 {type === 'rsi14'
-                    ? <RsiTooltip sync={sync} />
-                    : <MacdTooltip sync={sync} />
+                    ? <RsiTooltip sync={sync} mc={mc} />
+                    : <MacdTooltip sync={sync} mc={mc} />
                 }
             </div>
         </div>

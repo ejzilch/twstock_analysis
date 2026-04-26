@@ -82,6 +82,7 @@ export default function DashboardPage() {
     const { selectedRange, setSelectedRange, from_ms, to_ms } = useTimeRange(interval)
     const ALL_INDICATORS = new Set(['ma5', 'ma20', 'ma50', 'bollinger'])
     const [visibleIndicators, setVisibleIndicators] = useState<Set<string>>(ALL_INDICATORS)
+    const colorMode = useAppStore((s) => s.colorMode)
 
     const candlesQuery = useCandles({
         symbol, interval, from_ms, to_ms,
@@ -181,6 +182,7 @@ export default function DashboardPage() {
                                         candles={candles}
                                         type="rsi14"
                                         sync={chartSync}
+                                        colorMode={colorMode}
                                     />
                                 </Card>
                             )}
@@ -191,6 +193,7 @@ export default function DashboardPage() {
                                         candles={candles}
                                         type="macd"
                                         sync={chartSync}
+                                        colorMode={colorMode}
                                     />
                                 </Card>
                             )}

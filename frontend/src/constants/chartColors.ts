@@ -7,10 +7,6 @@ export const INDICATOR_COLORS = {
     bollMid: '#78909C',
     bollLower: '#4CAF50',
     rsi: '#00BCD4',
-    macdLine: '#F44336',
-    signal: '#4CAF50',
-    histPos: 'rgba(76,175,80,0.6)',
-    histNeg: 'rgba(244,67,54,0.6)',
 } as const
 
 // ── K 線漲跌顏色（依 colorMode 切換）─────────────────────────────────────────
@@ -41,6 +37,36 @@ const US_COLORS: CandleColorSet = {
 
 export function getCandleColors(colorMode: ColorMode): CandleColorSet {
     return colorMode === 'TW' ? TW_COLORS : US_COLORS
+}
+
+export interface MacdRsiColorSet {
+    netBuy: string
+    netSell: string
+    macdLine: string
+    signal: string
+    histPos: string
+    histNeg: string
+}
+
+export function getMacdRsiColors(colorMode: ColorMode): MacdRsiColorSet {
+    if (colorMode === 'TW') {
+        return {
+            netBuy: '#ef4444',
+            netSell: '#10b981',
+            macdLine: '#ef4444',   // 紅漲 快線紅
+            signal: '#10b981',   // 綠跌 慢線綠
+            histPos: 'rgba(239,68,68,0.6)',
+            histNeg: 'rgba(16,185,129,0.6)',
+        }
+    }
+    return {
+        netBuy: '#10b981',
+        netSell: '#ef4444',
+        macdLine: '#10b981',   // 綠漲 快線綠
+        signal: '#ef4444',   // 紅跌 慢線紅
+        histPos: 'rgba(16,185,129,0.6)',
+        histNeg: 'rgba(239,68,68,0.6)',
+    }
 }
 
 // ── 圖表背景 / 格線顏色 ───────────────────────────────────────────────────────
