@@ -50,20 +50,18 @@ export function CandleChart({
     })
     const colorMode = useAppStore((s) => s.colorMode)
 
-    // 記錄是否已對齊過
     const hasAlignedRef = useRef(false)
-    const prevCandleLengthRef = useRef(0)
-    const cancelAlignRef = useRef<(() => void) | null>(null)
 
-    // ── 橋梁 state：Effect 1 完成後設為 true，通知 Effect 2 可以執行 ──────────
-    const [chartReady, setChartReady] = useState(false)
+    // ── 橋梁：用 ref 同步守門，用 tick state 觸發 Effect 2 重跑 ──────────────
+    const chartReadyRef = useRef(false)
+    const [chartReadyTick, setChartReadyTick] = useState(0)
 
     // ── Effect 1：重建 chart ──────────────────────────────────────────────────
     useEffect(() => {
         if (!containerRef.current) return
 
-        // 重建前先把 chartReady 設回 false，避免 Effect 2 用到舊的 series
-        setChartReady(false)
+        // 同步立刻設 false，Effect 2 在下一輪執行時就能看到
+        chartReadyRef.current = false
 
         let isMounted = true
         let resizeObserver: ResizeObserver | null = null
@@ -105,9 +103,7 @@ export function CandleChart({
 
             chartRef.current = chart
 
-            seriesRef.current.candle = chart.addCandlestickSeries({
-                priceLineVisible: false,
-            })
+            seriesRef.current.candle = chart.addCandlestickSeries({ priceLineVisible: false })
             seriesRef.current.ma5 = chart.addLineSeries({ color: INDICATOR_COLORS.ma5, lineWidth: 1, priceLineVisible: false })
             seriesRef.current.ma20 = chart.addLineSeries({ color: INDICATOR_COLORS.ma20, lineWidth: 1, priceLineVisible: false })
             seriesRef.current.ma50 = chart.addLineSeries({ color: INDICATOR_COLORS.ma50, lineWidth: 1, priceLineVisible: false })
@@ -139,27 +135,28 @@ export function CandleChart({
                 sync.register(chart, seriesRef.current.candle)
             }
 
-            // ── 所有 series 建立完成，通知 Effect 2 可以執行 ──────────────────
-            setChartReady(true)
+            // ── 所有 series 建立完成，同步標記 ready 並觸發 Effect 2 ──────────
+            chartReadyRef.current = true
+            setChartReadyTick(t => t + 1)
         })
 
         return () => {
+            // 先關門，再 dispose，確保 Effect 2 不會碰到已銷毀的 chart
+            chartReadyRef.current = false
             hasAlignedRef.current = false
             isMounted = false
             resizeObserver?.disconnect()
             if (chartRef.current && sync) sync.unregister(chartRef.current)
             chartRef.current?.remove()
             chartRef.current = null
-            setChartReady(false)
         }
     }, [height, colorMode, showVolume])
 
 
     // ── Effect 2：更新資料 ────────────────────────────────────────────────────
-    // chartReady 在 deps 裡，確保 Effect 1 完成後才執行
     useEffect(() => {
-        // Effect 1 還沒完成，等待
-        if (!chartReady) return
+        // ref 守門：同步確認 chart 已就緒且未被 dispose
+        if (!chartReadyRef.current) return
 
         const s = seriesRef.current
         if (!s.candle || candles.length === 0) return
@@ -178,7 +175,6 @@ export function CandleChart({
                 color, wickColor: color, borderColor: color,
             }
         }))
-
 
         // Markers
         if (signals.length > 0) {
@@ -241,10 +237,7 @@ export function CandleChart({
             sync.alignRight()
         }
 
-    }, [chartReady, candles, signals, visibleIndicators, colorMode, markerTextMode])
+    }, [chartReadyTick, candles, signals, visibleIndicators, colorMode, markerTextMode])
 
     return <div ref={containerRef} style={{ height }} className="w-full rounded-lg overflow-hidden" />
 }
-
-// ── IndicatorPane (RSI / MACD sub-charts) ─────────────────────────────────────
-
