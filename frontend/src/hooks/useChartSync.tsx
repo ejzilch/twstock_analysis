@@ -11,6 +11,7 @@ export interface CrosshairData {
     low: number | null
     close: number | null
     volume: number | null
+    prevClose: number | null
     indicators: Record<string, unknown>
 }
 
@@ -80,6 +81,7 @@ export function useChartSync(): ChartSyncHandle {
                     low: (entry?.['low'] as number) ?? null,
                     close: (entry?.['close'] as number) ?? null,
                     volume: (entry?.['volume'] as number) ?? null,
+                    prevClose: (entry?.['prevClose'] as number) ?? null,
                     indicators: (entry?.['indicators'] as Record<string, unknown>) ?? {},
                 })
             }
@@ -127,13 +129,15 @@ export function useChartSync(): ChartSyncHandle {
         indicators?: Record<string, unknown>
     }>) => {
         const map = new Map<number, Record<string, unknown>>()
-        candles.forEach((c) => {
+        candles.forEach((c, idx) => {
+            const prevClose = idx > 0 ? candles[idx - 1].close : c.open
             map.set(Math.floor(c.timestamp_ms / 1000), {
                 open: c.open,
                 high: c.high,
                 low: c.low,
                 close: c.close,
                 volume: c.volume,
+                prevClose: prevClose,
                 indicators: c.indicators ?? {},
             })
         })

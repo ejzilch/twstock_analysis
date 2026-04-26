@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react'
 import type { CandleItem } from '@/src/types/api.generated'
 import { Time } from 'lightweight-charts';
-import { INDICATOR_COLORS, ColorMode, getMacdRsiColors } from '@/src/constants/chartColors'
+import { BASE_INDICATOR_COLORS, ColorMode, getThemedIndicatorColor } from '@/src/constants/chartColors'
 import { ChartSyncHandle } from '@/src/hooks/useChartSync'
 import { RsiTooltip, MacdTooltip } from './ChartTooltip'
 import { useAppStore } from '@/src/store/useAppStore'
@@ -19,7 +19,7 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
     const containerRef = useRef<HTMLDivElement>(null)
     const chartRef = useRef<any>(null)
     const height = type === 'rsi14' ? 160 : 180
-    const mc = getMacdRsiColors(colorMode ?? 'TW')
+    const mc = getThemedIndicatorColor(colorMode ?? 'TW')
 
     useEffect(() => {
         if (!containerRef.current || candles.length === 0) return
@@ -53,7 +53,7 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
             chartRef.current = chart
 
             if (type === 'rsi14') {
-                const rsiSeries = chart.addLineSeries({ color: INDICATOR_COLORS.rsi, lineWidth: 1, priceLineVisible: false })
+                const rsiSeries = chart.addLineSeries({ color: BASE_INDICATOR_COLORS.rsi, lineWidth: 1, priceLineVisible: false })
                 rsiSeries.setData(candles.map((c) => {
                     const time = (c.timestamp_ms / 1000) as Time;
                     const rsiValue = c.indicators?.['rsi14'];
