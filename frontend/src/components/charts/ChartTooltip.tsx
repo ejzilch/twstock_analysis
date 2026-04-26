@@ -1,6 +1,5 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
-import { clsx } from 'clsx'
 import type { CrosshairData, ChartSyncHandle } from '@/src/hooks/useChartSync'
 import { INDICATOR_COLORS } from '@/src/constants/chartColors'
 import type { ColorMode } from '@/src/constants/chartColors'
@@ -26,13 +25,18 @@ function fmtTime(ms: number | null): string {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-interface FieldProps { label: string; value: string; color?: string }
+// ── Field row ─────────────────────────────────────────────────────────────────
 
-function Field({ label, value, color }: FieldProps) {
+interface FieldProps { label: string; value: string; color?: string; mono?: boolean }
+
+function Field({ label, value, color, mono = true }: FieldProps) {
     return (
-        <div className="flex items-center justify-between gap-3">
-            <span className="text-slate-500 text-[10px] shrink-0">{label}</span>
-            <span className="font-mono font-semibold text-[11px] tabular-nums" style={color ? { color } : undefined}>
+        <div className="grid grid-cols-[auto_1fr] items-center gap-3 leading-none">
+            <span className="text-slate-500 text-[16px] shrink-0 tracking-wide ">{label}</span>
+            <span
+                className={`text-[16px] tabular-nums font-semibold text-right ${mono ? 'font-mono' : ''}`}
+                style={color ? { color } : { color: '#cbd5e1' }}
+            >
                 {value}
             </span>
         </div>
@@ -40,39 +44,39 @@ function Field({ label, value, color }: FieldProps) {
 }
 
 function Divider() {
-    return <div className="border-t border-slate-700/60 my-1" />
+    return <div className="border-t border-slate-700/50 my-1.5" />
 }
 
-// ── Floating panel shell ──────────────────────────────────────────────────────
+// ── Anchor panel — fixed top-left inside a relative container ─────────────────
 
-interface FloatPanelProps {
-    x: number
-    y: number
-    containerWidth: number
-    containerHeight: number
+interface AnchorPanelProps {
     children: React.ReactNode
+    /** extra Tailwind classes, e.g. to set width */
+    className?: string
+    visible: boolean
 }
 
-const PANEL_W = 188
-const OFFSET_X = 14
-const OFFSET_Y = 14
-
-function FloatPanel({ x, y, containerWidth, containerHeight, children }: FloatPanelProps) {
-    // 靠右超出時往左翻
-    const left = x + OFFSET_X + PANEL_W > containerWidth
-        ? x - PANEL_W - OFFSET_X
-        : x + OFFSET_X
-    // 靠下超出時往上翻
-    const top = y + OFFSET_Y + 300 > containerHeight
-        ? y - OFFSET_Y - 8
-        : y + OFFSET_Y
-
+function AnchorPanel({ children, className = '', visible }: AnchorPanelProps) {
     return (
         <div
-            className="absolute z-50 pointer-events-none select-none"
-            style={{ left, top, width: PANEL_W }}
+            className={`
+                absolute top-2 left-2 z-40 pointer-events-none select-none
+                transition-opacity duration-150
+                ${visible ? 'opacity-100' : 'opacity-0'}
+                ${className}
+            `}
         >
-            <div className="rounded-lg border border-slate-700/80 bg-slate-900/95 backdrop-blur-sm shadow-2xl shadow-black/60 px-2.5 py-2 text-[11px]">
+            {/* Glass card */}
+            <div
+                className="rounded-md px-2.5 py-2 text-[11px] space-y-1"
+                style={{
+                    background: 'rgba(15, 20, 35, 0.82)',
+                    backdropFilter: 'blur(8px)',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                    boxShadow: '0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04)',
+                    minWidth: 172,
+                }}
+            >
                 {children}
             </div>
         </div>
@@ -90,17 +94,19 @@ function useCrosshairData(sync: ChartSyncHandle | undefined): CrosshairData | nu
     return data
 }
 
-// ── CandleTooltip ─────────────────────────────────────────────────────────────
+// ── CandleTooltip — 固定在 K 線圖左上 ────────────────────────────────────────
 
 interface CandleTooltipProps {
     sync: ChartSyncHandle | undefined
     colorMode?: ColorMode
     visibleIndicators?: Set<string>
-    mousePos: { x: number; y: number } | null
-    containerSize: { width: number; height: number }
 }
 
-export function CandleTooltip({ sync, colorMode = 'TW', visibleIndicators, mousePos, containerSize }: CandleTooltipProps) {
+export function CandleTooltip({
+    sync,
+    colorMode = 'TW',
+    visibleIndicators,
+}: CandleTooltipProps) {
     const data = useCrosshairData(sync)
     const show = (key: string) => !visibleIndicators || visibleIndicators.has(key)
 
@@ -117,120 +123,173 @@ export function CandleTooltip({ sync, colorMode = 'TW', visibleIndicators, mouse
         return ((data.close - data.open) / data.open) * 100
     }, [data])
 
-    if (!data || !mousePos) return null
+    const riseOrfall = useMemo(() => {
+        if (!data || data.open == null || data.close == null || data.open === 0) return null
+        return (data.close - data.open)
+    }, [data])
 
-    const ma5 = data.indicators?.['ma5'] as number | undefined
-    const ma20 = data.indicators?.['ma20'] as number | undefined
-    const ma50 = data.indicators?.['ma50'] as number | undefined
-    const boll = data.indicators?.['bollinger'] as { upper: number; middle: number; lower: number } | undefined
+    const ma5 = data?.indicators?.['ma5'] as number | undefined
+    const ma20 = data?.indicators?.['ma20'] as number | undefined
+    const ma50 = data?.indicators?.['ma50'] as number | undefined
+    const boll = data?.indicators?.['bollinger'] as
+        | { upper: number; middle: number; lower: number }
+        | undefined
+
+    const hasMA = (show('ma5') && ma5 != null) || (show('ma20') && ma20 != null) || (show('ma50') && ma50 != null)
+    const hasBoll = show('bollinger') && boll != null
 
     return (
-        <FloatPanel x={0} y={0} containerWidth={containerSize.width} containerHeight={containerSize.height}>
-            {/* Time */}
-            <div className="text-slate-400 text-[10px] font-mono mb-1.5 whitespace-nowrap">
-                {fmtTime(data.timestamp_ms)}
+        <AnchorPanel visible={data != null} className="w-[220px]">
+            {/* Timestamp */}
+            <div className="text-[10px] font-mono text-slate-500 mb-1.5 whitespace-nowrap">
+                {fmtTime(data?.timestamp_ms ?? null)}
             </div>
 
             {/* OHLCV */}
-            <Field label="開盤 (Open)" value={fmt(data.open)} />
-            <Field label="最高 (Highest)" value={fmt(data.high)} />
-            <Field label="最低 (Lowest)" value={fmt(data.low)} />
-            <Field label="收盤 (Close)" value={fmt(data.close)} color={closeColor} />
-            {changePct != null && (
+            <Field label="最高 Highest" value={fmt(data?.high)} />
+            <Field label="開盤 Open" value={fmt(data?.open)} />
+            <Field label="最低 Lowest" value={fmt(data?.low)} />
+            <Field label="收盤 Close" value={fmt(data?.close)} color={closeColor} />
+            {riseOrfall != null && (
                 <Field
                     label="漲跌"
+                    value={`${riseOrfall >= 0 ? '+' : ''}${riseOrfall.toFixed(2)}`}
+                    color={riseOrfall >= 0 ? upColor : downColor}
+                />
+            )}
+            {changePct != null && (
+                <Field
+                    label="漲跌%"
                     value={`${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
                     color={changePct >= 0 ? upColor : downColor}
                 />
             )}
-            {data.volume != null && (
-                <Field label="量 V" value={fmtVolume(data.volume)} />
+            {data?.volume != null && (
+                <Field label="成交量 Volume" value={fmtVolume(data.volume)} />
             )}
 
             {/* MA */}
-            {(show('ma5') && ma5 != null) || (show('ma20') && ma20 != null) || (show('ma50') && ma50 != null) ? (
+            {hasMA && (
                 <>
                     <Divider />
                     {show('ma5') && ma5 != null && <Field label="MA5" value={fmt(ma5)} color={INDICATOR_COLORS.ma5} />}
                     {show('ma20') && ma20 != null && <Field label="MA20" value={fmt(ma20)} color={INDICATOR_COLORS.ma20} />}
                     {show('ma50') && ma50 != null && <Field label="MA50" value={fmt(ma50)} color={INDICATOR_COLORS.ma50} />}
                 </>
-            ) : null}
+            )}
 
             {/* Bollinger */}
-            {show('bollinger') && boll != null && (
+            {hasBoll && (
                 <>
                     <Divider />
-                    <Field label="BB ↑" value={fmt(boll.upper)} color={INDICATOR_COLORS.bollUpper} />
-                    <Field label="BB —" value={fmt(boll.middle)} color={INDICATOR_COLORS.bollMid} />
-                    <Field label="BB ↓" value={fmt(boll.lower)} color={INDICATOR_COLORS.bollLower} />
+                    <Field label="BB 上軌" value={fmt(boll!.upper)} color={INDICATOR_COLORS.bollUpper} />
+                    <Field label="BB 中軌" value={fmt(boll!.middle)} color={INDICATOR_COLORS.bollMid} />
+                    <Field label="BB 下軌" value={fmt(boll!.lower)} color={INDICATOR_COLORS.bollLower} />
                 </>
             )}
-        </FloatPanel>
+        </AnchorPanel>
     )
 }
 
-// ── RsiTooltip ────────────────────────────────────────────────────────────────
+// ── RsiTooltip — 固定在 RSI 圖左上 ───────────────────────────────────────────
 
 interface RsiTooltipProps {
     sync: ChartSyncHandle | undefined
-    mousePos: { x: number; y: number } | null
-    containerSize: { width: number; height: number }
 }
 
-export function RsiTooltip({ sync, mousePos, containerSize }: RsiTooltipProps) {
+export function RsiTooltip({ sync }: RsiTooltipProps) {
     const data = useCrosshairData(sync)
     const rsi = data?.indicators?.['rsi14'] as number | undefined
 
-    if (rsi == null || !mousePos) return null
-
     const color =
-        rsi >= 70 ? INDICATOR_COLORS.macdLine
-            : rsi <= 30 ? INDICATOR_COLORS.signal
-                : INDICATOR_COLORS.rsi
+        rsi == null ? INDICATOR_COLORS.rsi
+            : rsi >= 70 ? INDICATOR_COLORS.macdLine   // 超買 → 紅
+                : rsi <= 30 ? INDICATOR_COLORS.signal     // 超賣 → 綠
+                    : INDICATOR_COLORS.rsi
 
-    const label = rsi >= 70 ? '超買' : rsi <= 30 ? '超賣' : null
+    const zone =
+        rsi == null ? null
+            : rsi >= 70 ? '超買'
+                : rsi <= 30 ? '超賣'
+                    : null
 
     return (
-        <FloatPanel x={mousePos.x} y={mousePos.y} containerWidth={containerSize.width} containerHeight={containerSize.height}>
-            <div className="text-slate-500 text-[10px] mb-1.5 uppercase tracking-wider">RSI (14)</div>
-            <div className="flex items-center justify-between gap-2">
-                <span className="font-mono font-bold text-sm tabular-nums" style={{ color }}>{rsi.toFixed(2)}</span>
-                {label && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold"
-                        style={{ color, background: `${color}22` }}>
-                        {label}
+        <AnchorPanel visible={rsi != null}>
+            {/* Header */}
+            <div className="flex items-center justify-between mb-1.5 gap-2">
+                <span className="text-[10px] uppercase py-0.5 tracking-widest text-slate-500">RSI 14</span>
+                {zone && (
+                    <span
+                        className="text-[9px] px-1.5 py-0.5 rounded font-bold tracking-wide"
+                        style={{ color, background: `${color}22` }}
+                    >
+                        {zone}
                     </span>
                 )}
             </div>
-        </FloatPanel>
+
+            {/* Value */}
+            <div className="font-mono font-bold text-lg tabular-nums leading-none" style={{ color }}>
+                {rsi?.toFixed(2) ?? '—'}
+            </div>
+
+            {/* Visual bar */}
+            <div className="mt-2 h-1 rounded-full bg-slate-700/60 overflow-hidden">
+                <div
+                    className="h-full rounded-full transition-all duration-100"
+                    style={{
+                        width: `${Math.min(100, Math.max(0, rsi ?? 0))}%`,
+                        background: color,
+                        opacity: 0.75,
+                    }}
+                />
+            </div>
+            <div className="flex justify-between mt-0.5">
+                <span className="text-[9px] text-slate-600">0</span>
+                <span className="text-[9px] text-slate-600">30</span>
+                <span className="text-[9px] text-slate-600">70</span>
+                <span className="text-[9px] text-slate-600">100</span>
+            </div>
+        </AnchorPanel>
     )
 }
 
-// ── MacdTooltip ───────────────────────────────────────────────────────────────
+// ── MacdTooltip — 固定在 MACD 圖左上 ─────────────────────────────────────────
 
 interface MacdTooltipProps {
     sync: ChartSyncHandle | undefined
-    mousePos: { x: number; y: number } | null
-    containerSize: { width: number; height: number }
 }
 
-export function MacdTooltip({ sync, mousePos, containerSize }: MacdTooltipProps) {
+export function MacdTooltip({ sync }: MacdTooltipProps) {
     const data = useCrosshairData(sync)
     const macd = data?.indicators?.['macd'] as
         | { macd_line: number; signal_line: number; histogram: number }
         | undefined
 
-    if (!macd || !mousePos) return null
-
-    const oscColor = macd.histogram >= 0 ? '#4ade80' : '#f87171'
+    const oscColor = !macd ? '#94a3b8' : macd.histogram >= 0 ? '#4ade80' : '#f87171'
+    const cross =
+        !macd ? null
+            : macd.macd_line > macd.signal_line ? { label: '多頭排列', color: '#4ade80' }
+                : { label: '空頭排列', color: '#f87171' }
 
     return (
-        <FloatPanel x={mousePos.x} y={mousePos.y} containerWidth={containerSize.width} containerHeight={containerSize.height}>
-            <div className="text-slate-500 text-[10px] mb-1.5 uppercase tracking-wider">MACD (12,26,9)</div>
-            <Field label="DIF" value={fmt(macd.macd_line, 4)} color={INDICATOR_COLORS.macdLine} />
-            <Field label="DEA" value={fmt(macd.signal_line, 4)} color={INDICATOR_COLORS.signal} />
-            <Field label="OSC" value={fmt(macd.histogram, 4)} color={oscColor} />
-        </FloatPanel>
+        <AnchorPanel visible={macd != null}>
+            {/* Header */}
+            <div className="flex items-center justify-between mb-1.5 gap-2">
+                <span className="text-[10px] uppercase tracking-widest text-slate-500">MACD 12·26·9</span>
+                {cross && (
+                    <span
+                        className="text-[9px] px-1.5 py-0.5 rounded font-bold tracking-wide"
+                        style={{ color: cross.color, background: `${cross.color}22` }}
+                    >
+                        {cross.label}
+                    </span>
+                )}
+            </div>
+
+            <Field label="快速線 DIF" value={fmt(macd?.macd_line, 4)} color={INDICATOR_COLORS.macdLine} />
+            <Field label="慢速線 DEA" value={fmt(macd?.signal_line, 4)} color={INDICATOR_COLORS.signal} />
+            <Field label="柱體值 OSC" value={fmt(macd?.histogram, 4)} color={oscColor} />
+        </AnchorPanel>
     )
 }

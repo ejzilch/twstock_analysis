@@ -10,6 +10,7 @@ import {
     getCandleColors,
 } from '@/src/constants/chartColors'
 import { ChartSyncHandle } from '@/src/hooks/useChartSync'
+import { CandleTooltip } from './ChartTooltip'
 
 interface CandleChartProps {
     candles: CandleItem[]
@@ -51,8 +52,6 @@ export function CandleChart({
     const colorMode = useAppStore((s) => s.colorMode)
 
     const hasAlignedRef = useRef(false)
-
-    // ── 橋梁：用 ref 同步守門，用 tick state 觸發 Effect 2 重跑 ──────────────
     const chartReadyRef = useRef(false)
     const [chartReadyTick, setChartReadyTick] = useState(0)
 
@@ -60,7 +59,6 @@ export function CandleChart({
     useEffect(() => {
         if (!containerRef.current) return
 
-        // 同步立刻設 false，Effect 2 在下一輪執行時就能看到
         chartReadyRef.current = false
 
         let isMounted = true
@@ -97,7 +95,8 @@ export function CandleChart({
                     borderColor: CHART_THEME.borderColor,
                     timeVisible: true,
                     secondsVisible: false,
-                    rightOffset: 12,
+                    rightOffset: 0,
+                    barSpacing: containerRef.current.clientWidth / 88,
                 },
             })
 
@@ -135,13 +134,11 @@ export function CandleChart({
                 sync.register(chart, seriesRef.current.candle)
             }
 
-            // ── 所有 series 建立完成，同步標記 ready 並觸發 Effect 2 ──────────
             chartReadyRef.current = true
             setChartReadyTick(t => t + 1)
         })
 
         return () => {
-            // 先關門，再 dispose，確保 Effect 2 不會碰到已銷毀的 chart
             chartReadyRef.current = false
             hasAlignedRef.current = false
             isMounted = false
@@ -155,7 +152,6 @@ export function CandleChart({
 
     // ── Effect 2：更新資料 ────────────────────────────────────────────────────
     useEffect(() => {
-        // ref 守門：同步確認 chart 已就緒且未被 dispose
         if (!chartReadyRef.current) return
 
         const s = seriesRef.current
@@ -175,6 +171,12 @@ export function CandleChart({
                 color, wickColor: color, borderColor: color,
             }
         }))
+
+        // 把完整 candle（含 OHLCV、volume、indicators）餵進 sync，
+        // 讓任意子圖（RSI/MACD）觸發 crosshair 時都能查到完整資料。
+        if (sync) {
+            ; (sync as any).feedCandleMap?.(candles)
+        }
 
         // Markers
         if (signals.length > 0) {
@@ -232,12 +234,19 @@ export function CandleChart({
             }
         }))
 
-        if (!hasAlignedRef.current && sync) {
-            hasAlignedRef.current = true
-            sync.alignRight()
-        }
-
     }, [chartReadyTick, candles, signals, visibleIndicators, colorMode, markerTextMode])
 
-    return <div ref={containerRef} style={{ height }} className="w-full rounded-lg overflow-hidden" />
+    return (
+        // relative — 讓 CandleTooltip absolute 定位能吸附在這個容器左上
+        <div className="relative">
+            <div ref={containerRef} style={{ height }} className="w-full rounded-lg overflow-hidden" />
+
+            {/* Fixed top-left overlay */}
+            <CandleTooltip
+                sync={sync}
+                colorMode={colorMode}
+                visibleIndicators={visibleIndicators}
+            />
+        </div>
+    )
 }

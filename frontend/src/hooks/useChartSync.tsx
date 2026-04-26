@@ -2,23 +2,50 @@
 import { useRef, useCallback } from 'react'
 import type { IChartApi, ISeriesApi, SeriesType } from 'lightweight-charts'
 
+// ── CrosshairData：tooltip 所需的完整資料結構 ─────────────────────────────────
+
+export interface CrosshairData {
+    timestamp_ms: number | null
+    open: number | null
+    high: number | null
+    low: number | null
+    close: number | null
+    volume: number | null
+    indicators: Record<string, unknown>
+}
+
+// ── ChartSyncHandle ───────────────────────────────────────────────────────────
+
 export interface ChartSyncHandle {
     register: (chart: IChartApi, series: ISeriesApi<SeriesType>) => void
     unregister: (chart: IChartApi) => void
-    alignRight: (defaultBarsVisible?: number) => void
+    // Subscribe crosshair 資料，回傳 unsubscribe fn
+    subscribeCrosshairData: (cb: (data: CrosshairData | null) => void) => () => void
 }
 
 export function useChartSync(): ChartSyncHandle {
     const chartsRef = useRef<Map<IChartApi, ISeriesApi<SeriesType>>>(new Map())
-    // key: chart, value: 該 chart 的 series（用來讀 dataLength）
     const seriesRef = useRef<Map<IChartApi, ISeriesApi<SeriesType>>>(new Map())
     const maxLogicalRef = useRef<Map<IChartApi, number>>(new Map())
     const isSyncingRef = useRef(false)
+    const dataLengthRef = useRef(0)
 
-    /** 從 series 精確算出 maxLogical = dataLength - 1 */
-    const calcMaxLogical = (series: ISeriesApi<SeriesType>): number => {
-        return series.data().length - 1
-    }
+    // ── CrosshairData 訂閱清單 ────────────────────────────────────────────────
+    const crosshairListeners = useRef<Set<(data: CrosshairData | null) => void>>(new Set())
+
+    const subscribeCrosshairData = useCallback((cb: (data: CrosshairData | null) => void) => {
+        crosshairListeners.current.add(cb)
+        return () => { crosshairListeners.current.delete(cb) }
+    }, [])
+
+    const broadcastCrosshair = useCallback((data: CrosshairData | null) => {
+        crosshairListeners.current.forEach(cb => cb(data))
+    }, [])
+
+    // ── 全域 master candle map（所有 chart 共用同一份）────────────────────────
+    // key: timeSec（timestamp_ms / 1000），value: { open, high, low, close, volume, indicators }
+    // 只有 CandleChart 的 feedCandleMap 會寫入；RSI/MACD chart 觸發 crosshair 時同樣能查到。
+    const masterCandleMap = useRef<Map<number, Record<string, unknown>>>(new Map())
 
     const register = useCallback((chart: IChartApi, series: ISeriesApi<SeriesType>) => {
         chartsRef.current.set(chart, series)
@@ -26,47 +53,59 @@ export function useChartSync(): ChartSyncHandle {
 
         // ── 同步 timeScale ─────────────────────────────────────────────────
         chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-            if (!range || isSyncingRef.current) return;
+            if (!range || isSyncingRef.current) return
 
-            isSyncingRef.current = true;
+            isSyncingRef.current = true
             chartsRef.current.forEach((_, other) => {
-                if (other === chart) return;
-                other.timeScale().setVisibleLogicalRange(range);
-            });
-            setTimeout(() => { isSyncingRef.current = false; }, 0);
-        });
+                if (other === chart) return
+                other.timeScale().setVisibleLogicalRange(range)
+            })
+            setTimeout(() => { isSyncingRef.current = false }, 0)
+        })
 
-        // ── 同步 crosshair ─────────────────────────────────────────────────
+        // ── 同步 crosshair + 廣播 CrosshairData ───────────────────────────
         chart.subscribeCrosshairMove((param) => {
+            if (!param.point || !param.time) {
+                broadcastCrosshair(null)
+            } else {
+                const timeSec = param.time as number
+                // 不管是哪個子圖觸發（K線 / RSI / MACD），
+                // 一律從 masterCandleMap 查完整的 OHLCV + indicators。
+                const entry = masterCandleMap.current.get(timeSec)
+
+                broadcastCrosshair({
+                    timestamp_ms: timeSec * 1000,
+                    open: (entry?.['open'] as number) ?? null,
+                    high: (entry?.['high'] as number) ?? null,
+                    low: (entry?.['low'] as number) ?? null,
+                    close: (entry?.['close'] as number) ?? null,
+                    volume: (entry?.['volume'] as number) ?? null,
+                    indicators: (entry?.['indicators'] as Record<string, unknown>) ?? {},
+                })
+            }
+
+            // 同步其他圖表的 crosshair 位置
             chartsRef.current.forEach((otherSeries, other) => {
-                if (other === chart) return;
+                if (other === chart) return
 
-                // 防護：滑鼠移出圖表或無效時間
                 if (!param.point || !param.time) {
-                    other.clearCrosshairPosition();
-                    return;
+                    other.clearCrosshairPosition()
+                    return
                 }
 
-                // 取得副圖資料，並直接用 param.time 尋找「同一天」的資料點
-                // 這比使用 logical index 更安全，能徹底避免陣列長度偏移問題
-                const data = otherSeries.data() as any[];
-                const dataPoint = data.find((d) => d.time === param.time);
+                const data = otherSeries.data() as any[]
+                const dataPoint = data.find((d) => d.time === param.time)
+                const price = dataPoint?.value ?? dataPoint?.close
 
-                // 取得該點數值 (指標用 value，K線用 close)
-                const price = dataPoint?.value ?? dataPoint?.close;
-
-                // 嚴格排除 undefined, null 以及 NaN
                 if (price === undefined || price === null || Number.isNaN(price)) {
-                    // 如果這天是空白資料，徹底清除游標 (隱藏垂直與水平線)
-                    other.clearCrosshairPosition();
-                    return;
+                    other.clearCrosshairPosition()
+                    return
                 }
 
-                // 確保 price 是正常的數字後，畫出精準的十字線
-                other.setCrosshairPosition(price, param.time, otherSeries);
-            });
-        });
-    }, [])
+                other.setCrosshairPosition(price, param.time, otherSeries)
+            })
+        })
+    }, [broadcastCrosshair])
 
     const unregister = useCallback((chart: IChartApi) => {
         chartsRef.current.delete(chart)
@@ -74,43 +113,35 @@ export function useChartSync(): ChartSyncHandle {
         maxLogicalRef.current.delete(chart)
     }, [])
 
-    const alignRight = useCallback((defaultBarsVisible = 88) => {
-        requestAnimationFrame(() => {
-            seriesRef.current.forEach((series, chart) => {
-                const dataLen = series.data().length
-                if (dataLen > 0) {
-                    maxLogicalRef.current.set(chart, dataLen - 1)
-                }
-            })
-
-            isSyncingRef.current = true
-            chartsRef.current.forEach((_, chart) => {
-                const max = maxLogicalRef.current.get(chart)
-                if (max == null) return
-
-                // 先讓圖表自己貼右，讀取它實際用的 rightOffset
-                chart.timeScale().scrollToPosition(0, false)
-            })
-            isSyncingRef.current = false
-
-            // 再下一幀讀取實際 offset 後統一設定 visible range
-            requestAnimationFrame(() => {
-                isSyncingRef.current = true
-                chartsRef.current.forEach((_, chart) => {
-                    const max = maxLogicalRef.current.get(chart)
-                    if (max == null) return
-                    const range = chart.timeScale().getVisibleLogicalRange()
-                    // scrollToPosition(0) 後，range.to 就是圖表自己算的「貼右」位置
-                    const actualTo = range?.to ?? max
-                    chart.timeScale().setVisibleLogicalRange({
-                        from: actualTo - defaultBarsVisible,
-                        to: actualTo,
-                    })
-                })
-                isSyncingRef.current = false
+    /**
+     * CandleChart 在 setData 後呼叫此方法，把完整 candle 陣列（含 OHLCV、indicators）
+     * 寫入 masterCandleMap。RSI/MACD chart 觸發 crosshair 時即可查到同一份資料。
+     */
+    const feedCandleMap = useCallback((candles: Array<{
+        timestamp_ms: number
+        open: number
+        high: number
+        low: number
+        close: number
+        volume?: number
+        indicators?: Record<string, unknown>
+    }>) => {
+        const map = new Map<number, Record<string, unknown>>()
+        candles.forEach((c) => {
+            map.set(Math.floor(c.timestamp_ms / 1000), {
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close,
+                volume: c.volume,
+                indicators: c.indicators ?? {},
             })
         })
+        masterCandleMap.current = map
+        dataLengthRef.current = candles.length
     }, [])
 
-    return { register, unregister, alignRight }
+    return { register, unregister, subscribeCrosshairData, feedCandleMap } as ChartSyncHandle & {
+        feedCandleMap: typeof feedCandleMap
+    }
 }
