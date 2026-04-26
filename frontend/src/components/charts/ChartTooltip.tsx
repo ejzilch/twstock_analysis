@@ -1,9 +1,9 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import type { CrosshairData, ChartSyncHandle } from '@/src/hooks/useChartSync'
-import { INDICATOR_COLORS } from '@/src/constants/chartColors'
-import type { ColorMode, MacdRsiColorSet } from '@/src/constants/chartColors'
-import { getCandleColors } from '@/src/constants/chartColors'
+import { } from '@/src/constants/chartColors'
+import type { ColorMode, ThemedIndicatorColorsSet } from '@/src/constants/chartColors'
+import { getCandleColors, getThemedIndicatorColor, BASE_INDICATOR_COLORS } from '@/src/constants/chartColors'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -112,20 +112,25 @@ export function CandleTooltip({
     const show = (key: string) => !visibleIndicators || visibleIndicators.has(key)
 
     const candleColor = getCandleColors(colorMode)
+    const themedIndicatorColor = getThemedIndicatorColor(colorMode)
 
     const closeColor = useMemo(() => {
         if (!data || data.open == null || data.close == null) return undefined
         return data.close >= data.open ? candleColor.up : candleColor.down
     }, [data])
 
-    const changePct = useMemo(() => {
-        if (!data || data.open == null || data.close == null || data.open === 0) return null
-        return ((data.close - data.open) / data.open) * 100
+    const riseOrfall = useMemo(() => {
+        if (!data || data.close == null) return null
+        const base = data.prevClose ?? data.open
+        if (base == null || base === 0) return null
+        return data.close - base
     }, [data])
 
-    const riseOrfall = useMemo(() => {
-        if (!data || data.open == null || data.close == null || data.open === 0) return null
-        return (data.close - data.open)
+    const changePct = useMemo(() => {
+        if (!data || data.close == null) return null
+        const base = data.prevClose ?? data.open
+        if (base == null || base === 0) return null
+        return ((data.close - base) / base) * 100
     }, [data])
 
     const ma5 = data?.indicators?.['ma5'] as number | undefined
@@ -172,9 +177,9 @@ export function CandleTooltip({
             {hasMA && (
                 <>
                     <Divider />
-                    {show('ma5') && ma5 != null && <Field label="MA5" value={fmt(ma5)} color={INDICATOR_COLORS.ma5} />}
-                    {show('ma20') && ma20 != null && <Field label="MA20" value={fmt(ma20)} color={INDICATOR_COLORS.ma20} />}
-                    {show('ma50') && ma50 != null && <Field label="MA50" value={fmt(ma50)} color={INDICATOR_COLORS.ma50} />}
+                    {show('ma5') && ma5 != null && <Field label="MA5" value={fmt(ma5)} color={BASE_INDICATOR_COLORS.ma5} />}
+                    {show('ma20') && ma20 != null && <Field label="MA20" value={fmt(ma20)} color={BASE_INDICATOR_COLORS.ma20} />}
+                    {show('ma50') && ma50 != null && <Field label="MA50" value={fmt(ma50)} color={BASE_INDICATOR_COLORS.ma50} />}
                 </>
             )}
 
@@ -182,9 +187,9 @@ export function CandleTooltip({
             {hasBoll && (
                 <>
                     <Divider />
-                    <Field label="BB 上軌" value={fmt(boll!.upper)} color={INDICATOR_COLORS.bollUpper} />
-                    <Field label="BB 中軌" value={fmt(boll!.middle)} color={INDICATOR_COLORS.bollMid} />
-                    <Field label="BB 下軌" value={fmt(boll!.lower)} color={INDICATOR_COLORS.bollLower} />
+                    <Field label="BB 上軌" value={fmt(boll!.upper)} color={themedIndicatorColor.bollUpper} />
+                    <Field label="BB 中軌" value={fmt(boll!.middle)} color={BASE_INDICATOR_COLORS.bollMid} />
+                    <Field label="BB 下軌" value={fmt(boll!.lower)} color={themedIndicatorColor.bollLower} />
                 </>
             )}
         </AnchorPanel>
@@ -195,18 +200,18 @@ export function CandleTooltip({
 
 interface RsiTooltipProps {
     sync: ChartSyncHandle | undefined
-    mc: MacdRsiColorSet
+    mc: ThemedIndicatorColorsSet
 }
 
-export function RsiTooltip({ sync }: RsiTooltipProps, mc: MacdRsiColorSet) {
+export function RsiTooltip({ sync, mc }: RsiTooltipProps) {
     const data = useCrosshairData(sync)
     const rsi = data?.indicators?.['rsi14'] as number | undefined
 
     const color =
-        rsi == null ? INDICATOR_COLORS.rsi
-            : rsi >= 70 ? mc.macdLine   // 超買 → 紅
-                : rsi <= 30 ? mc.signal     // 超賣 → 綠
-                    : INDICATOR_COLORS.rsi
+        rsi == null ? BASE_INDICATOR_COLORS.rsi
+            : rsi >= 70 ? mc.macdLine
+                : rsi <= 30 ? mc.signal
+                    : BASE_INDICATOR_COLORS.rsi
 
     const zone =
         rsi == null ? null
@@ -218,10 +223,10 @@ export function RsiTooltip({ sync }: RsiTooltipProps, mc: MacdRsiColorSet) {
         <AnchorPanel visible={rsi != null}>
             {/* Header */}
             <div className="flex items-center justify-between mb-1.5 gap-2">
-                <span className="text-[10px] uppercase py-0.5 tracking-widest text-slate-500">RSI 14</span>
+                <span className="text-[10px] uppercase py-1.5 tracking-widest text-slate-500">RSI 14</span>
                 {zone && (
                     <span
-                        className="text-[9px] px-1.5 py-0.5 rounded font-bold tracking-wide"
+                        className="text-[16px] px-1.5 py-0.5 rounded font-bold tracking-wide"
                         style={{ color, background: `${color}22` }}
                     >
                         {zone}
@@ -259,7 +264,7 @@ export function RsiTooltip({ sync }: RsiTooltipProps, mc: MacdRsiColorSet) {
 
 interface MacdTooltipProps {
     sync: ChartSyncHandle | undefined
-    mc: MacdRsiColorSet | undefined
+    mc: ThemedIndicatorColorsSet | undefined
 }
 
 export function MacdTooltip({ sync, mc }: MacdTooltipProps) {
@@ -279,10 +284,10 @@ export function MacdTooltip({ sync, mc }: MacdTooltipProps) {
         <AnchorPanel visible={macd != null}>
             {/* Header */}
             <div className="flex items-center justify-between mb-1.5 gap-2">
-                <span className="text-[10px] uppercase tracking-widest text-slate-500">MACD 12·26·9</span>
+                <span className="text-[10px] uppercase py-1.5 tracking-widest text-slate-500">MACD 12·26·9</span>
                 {cross && (
                     <span
-                        className="text-[9px] px-1.5 py-0.5 rounded font-bold tracking-wide"
+                        className="text-[16px] px-1.5 py-0.5 rounded font-bold tracking-wide"
                         style={{ color: cross.color, background: `${cross.color}22` }}
                     >
                         {cross.label}

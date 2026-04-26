@@ -4,10 +4,11 @@ import type { CandleItem, SignalItem } from '@/src/types/api.generated'
 import { Time, IChartApi, ISeriesApi } from 'lightweight-charts';
 import { useAppStore } from '@/src/store/useAppStore'
 import {
-    INDICATOR_COLORS,
+    BASE_INDICATOR_COLORS,
     CHART_THEME,
     SIGNAL_TYPE,
     getCandleColors,
+    getThemedIndicatorColor
 } from '@/src/constants/chartColors'
 import { ChartSyncHandle } from '@/src/hooks/useChartSync'
 import { CandleTooltip } from './ChartTooltip'
@@ -63,6 +64,7 @@ export function CandleChart({
 
         let isMounted = true
         let resizeObserver: ResizeObserver | null = null
+        const themedIndicatorColor = getThemedIndicatorColor(colorMode)
 
         import('lightweight-charts').then(({ createChart, CrosshairMode, LineStyle }) => {
             if (!isMounted || !containerRef.current) return
@@ -103,14 +105,14 @@ export function CandleChart({
             chartRef.current = chart
 
             seriesRef.current.candle = chart.addCandlestickSeries({ priceLineVisible: false })
-            seriesRef.current.ma5 = chart.addLineSeries({ color: INDICATOR_COLORS.ma5, lineWidth: 1, priceLineVisible: false })
-            seriesRef.current.ma20 = chart.addLineSeries({ color: INDICATOR_COLORS.ma20, lineWidth: 1, priceLineVisible: false })
-            seriesRef.current.ma50 = chart.addLineSeries({ color: INDICATOR_COLORS.ma50, lineWidth: 1, priceLineVisible: false })
+            seriesRef.current.ma5 = chart.addLineSeries({ color: BASE_INDICATOR_COLORS.ma5, lineWidth: 1, priceLineVisible: false })
+            seriesRef.current.ma20 = chart.addLineSeries({ color: BASE_INDICATOR_COLORS.ma20, lineWidth: 1, priceLineVisible: false })
+            seriesRef.current.ma50 = chart.addLineSeries({ color: BASE_INDICATOR_COLORS.ma50, lineWidth: 1, priceLineVisible: false })
 
             const bollOpts = { lineWidth: 1 as const, lineStyle: LineStyle.Dashed, priceLineVisible: false }
-            seriesRef.current.bollUpper = chart.addLineSeries({ ...bollOpts, color: INDICATOR_COLORS.bollUpper })
-            seriesRef.current.bollMid = chart.addLineSeries({ ...bollOpts, color: INDICATOR_COLORS.bollMid })
-            seriesRef.current.bollLower = chart.addLineSeries({ ...bollOpts, color: INDICATOR_COLORS.bollLower })
+            seriesRef.current.bollUpper = chart.addLineSeries({ ...bollOpts, color: themedIndicatorColor.bollUpper })
+            seriesRef.current.bollMid = chart.addLineSeries({ ...bollOpts, color: BASE_INDICATOR_COLORS.bollMid })
+            seriesRef.current.bollLower = chart.addLineSeries({ ...bollOpts, color: themedIndicatorColor.bollLower })
 
             if (showVolume) {
                 seriesRef.current.volume = chart.addHistogramSeries({

@@ -1,12 +1,12 @@
 'use client'
 import { clsx } from 'clsx'
-import { INDICATOR_COLORS } from '@/src/constants/chartColors'
+import { BASE_INDICATOR_COLORS } from '@/src/constants/chartColors'
 
 const TOGGLES = [
-    { key: 'ma5', label: 'MA5', color: INDICATOR_COLORS.ma5 },
-    { key: 'ma20', label: 'MA20', color: INDICATOR_COLORS.ma20 },
-    { key: 'ma50', label: 'MA50', color: INDICATOR_COLORS.ma50 },
-    { key: 'bollinger', label: 'BOLL', color: INDICATOR_COLORS.bollMid },
+    { key: 'ma5', label: 'MA5', color: BASE_INDICATOR_COLORS.ma5 },
+    { key: 'ma20', label: 'MA20', color: BASE_INDICATOR_COLORS.ma20 },
+    { key: 'ma50', label: 'MA50', color: BASE_INDICATOR_COLORS.ma50 },
+    { key: 'bollinger', label: 'BOLL', color: BASE_INDICATOR_COLORS.bollMid },
 ] as const
 
 type IndicatorKey = typeof TOGGLES[number]['key']

@@ -1,11 +1,9 @@
 // ── 固定指標顏色 ──────────────────────────────────────────────────────────────
-export const INDICATOR_COLORS = {
+export const BASE_INDICATOR_COLORS = {
     ma5: '#2196F3',
     ma20: '#FF9800',
     ma50: '#9C27B0',
-    bollUpper: '#F44336',
     bollMid: '#78909C',
-    bollLower: '#4CAF50',
     rsi: '#00BCD4',
 } as const
 
@@ -39,7 +37,9 @@ export function getCandleColors(colorMode: ColorMode): CandleColorSet {
     return colorMode === 'TW' ? TW_COLORS : US_COLORS
 }
 
-export interface MacdRsiColorSet {
+export interface ThemedIndicatorColorsSet {
+    bollUpper: string,
+    bollLower: string
     netBuy: string
     netSell: string
     macdLine: string
@@ -48,22 +48,26 @@ export interface MacdRsiColorSet {
     histNeg: string
 }
 
-export function getMacdRsiColors(colorMode: ColorMode): MacdRsiColorSet {
+export function getThemedIndicatorColor(colorMode: ColorMode): ThemedIndicatorColorsSet {
     if (colorMode === 'TW') {
         return {
+            bollUpper: '#F44336',
+            bollLower: '#4CAF50',
             netBuy: '#ef4444',
             netSell: '#10b981',
-            macdLine: '#ef4444',   // 紅漲 快線紅
-            signal: '#10b981',   // 綠跌 慢線綠
+            macdLine: '#ef4444',
+            signal: '#10b981',
             histPos: 'rgba(239,68,68,0.6)',
             histNeg: 'rgba(16,185,129,0.6)',
         }
     }
     return {
+        bollUpper: '#4CAF50',
+        bollLower: '#F44336',
         netBuy: '#10b981',
         netSell: '#ef4444',
-        macdLine: '#10b981',   // 綠漲 快線綠
-        signal: '#ef4444',   // 紅跌 慢線紅
+        macdLine: '#10b981',
+        signal: '#ef4444',
         histPos: 'rgba(16,185,129,0.6)',
         histNeg: 'rgba(239,68,68,0.6)',
     }
