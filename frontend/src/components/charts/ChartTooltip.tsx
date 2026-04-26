@@ -2,7 +2,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import type { CrosshairData, ChartSyncHandle } from '@/src/hooks/useChartSync'
 import { INDICATOR_COLORS } from '@/src/constants/chartColors'
-import type { ColorMode } from '@/src/constants/chartColors'
+import type { ColorMode, MacdRsiColorSet } from '@/src/constants/chartColors'
+import { getCandleColors } from '@/src/constants/chartColors'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -110,13 +111,12 @@ export function CandleTooltip({
     const data = useCrosshairData(sync)
     const show = (key: string) => !visibleIndicators || visibleIndicators.has(key)
 
-    const upColor = colorMode === 'TW' ? '#ef4444' : '#10b981'
-    const downColor = colorMode === 'TW' ? '#10b981' : '#ef4444'
+    const candleColor = getCandleColors(colorMode)
 
     const closeColor = useMemo(() => {
         if (!data || data.open == null || data.close == null) return undefined
-        return data.close >= data.open ? upColor : downColor
-    }, [data, upColor, downColor])
+        return data.close >= data.open ? candleColor.up : candleColor.down
+    }, [data])
 
     const changePct = useMemo(() => {
         if (!data || data.open == null || data.close == null || data.open === 0) return null
@@ -154,14 +154,14 @@ export function CandleTooltip({
                 <Field
                     label="漲跌"
                     value={`${riseOrfall >= 0 ? '+' : ''}${riseOrfall.toFixed(2)}`}
-                    color={riseOrfall >= 0 ? upColor : downColor}
+                    color={riseOrfall >= 0 ? candleColor.up : candleColor.down}
                 />
             )}
             {changePct != null && (
                 <Field
                     label="漲跌%"
                     value={`${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
-                    color={changePct >= 0 ? upColor : downColor}
+                    color={changePct >= 0 ? candleColor.up : candleColor.down}
                 />
             )}
             {data?.volume != null && (
@@ -195,16 +195,17 @@ export function CandleTooltip({
 
 interface RsiTooltipProps {
     sync: ChartSyncHandle | undefined
+    mc: MacdRsiColorSet
 }
 
-export function RsiTooltip({ sync }: RsiTooltipProps) {
+export function RsiTooltip({ sync }: RsiTooltipProps, mc: MacdRsiColorSet) {
     const data = useCrosshairData(sync)
     const rsi = data?.indicators?.['rsi14'] as number | undefined
 
     const color =
         rsi == null ? INDICATOR_COLORS.rsi
-            : rsi >= 70 ? INDICATOR_COLORS.macdLine   // 超買 → 紅
-                : rsi <= 30 ? INDICATOR_COLORS.signal     // 超賣 → 綠
+            : rsi >= 70 ? mc.macdLine   // 超買 → 紅
+                : rsi <= 30 ? mc.signal     // 超賣 → 綠
                     : INDICATOR_COLORS.rsi
 
     const zone =
@@ -258,19 +259,21 @@ export function RsiTooltip({ sync }: RsiTooltipProps) {
 
 interface MacdTooltipProps {
     sync: ChartSyncHandle | undefined
+    mc: MacdRsiColorSet | undefined
 }
 
-export function MacdTooltip({ sync }: MacdTooltipProps) {
+export function MacdTooltip({ sync, mc }: MacdTooltipProps) {
     const data = useCrosshairData(sync)
+
     const macd = data?.indicators?.['macd'] as
         | { macd_line: number; signal_line: number; histogram: number }
         | undefined
 
-    const oscColor = !macd ? '#94a3b8' : macd.histogram >= 0 ? '#4ade80' : '#f87171'
+    const oscColor = !macd ? '#94a3b8' : macd.histogram >= 0 ? mc?.histPos : mc?.histNeg
     const cross =
         !macd ? null
-            : macd.macd_line > macd.signal_line ? { label: '多頭排列', color: '#4ade80' }
-                : { label: '空頭排列', color: '#f87171' }
+            : macd.macd_line > macd.signal_line ? { label: '多頭排列', color: mc?.macdLine }
+                : { label: '空頭排列', color: mc?.signal }
 
     return (
         <AnchorPanel visible={macd != null}>
@@ -287,8 +290,8 @@ export function MacdTooltip({ sync }: MacdTooltipProps) {
                 )}
             </div>
 
-            <Field label="快速線 DIF" value={fmt(macd?.macd_line, 4)} color={INDICATOR_COLORS.macdLine} />
-            <Field label="慢速線 DEA" value={fmt(macd?.signal_line, 4)} color={INDICATOR_COLORS.signal} />
+            <Field label="快速線 DIF" value={fmt(macd?.macd_line, 4)} color={mc?.macdLine} />
+            <Field label="慢速線 DEA" value={fmt(macd?.signal_line, 4)} color={mc?.signal} />
             <Field label="柱體值 OSC" value={fmt(macd?.histogram, 4)} color={oscColor} />
         </AnchorPanel>
     )
