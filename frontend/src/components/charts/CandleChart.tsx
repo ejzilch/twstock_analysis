@@ -52,6 +52,8 @@ export function CandleChart({
 
     // 記錄是否已對齊過
     const hasAlignedRef = useRef(false)
+    const prevCandleLengthRef = useRef(0)
+    const cancelAlignRef = useRef<(() => void) | null>(null)
 
     // ── 橋梁 state：Effect 1 完成後設為 true，通知 Effect 2 可以執行 ──────────
     const [chartReady, setChartReady] = useState(false)
@@ -97,7 +99,7 @@ export function CandleChart({
                     borderColor: CHART_THEME.borderColor,
                     timeVisible: true,
                     secondsVisible: false,
-                    rightOffset: 0,
+                    rightOffset: 12,
                 },
             })
 
@@ -156,7 +158,9 @@ export function CandleChart({
     // ── Effect 2：更新資料 ────────────────────────────────────────────────────
     // chartReady 在 deps 裡，確保 Effect 1 完成後才執行
     useEffect(() => {
-        if (!chartReady) return           // ← Effect 1 還沒完成，等待
+        // Effect 1 還沒完成，等待
+        if (!chartReady) return
+
         const s = seriesRef.current
         if (!s.candle || candles.length === 0) return
 
