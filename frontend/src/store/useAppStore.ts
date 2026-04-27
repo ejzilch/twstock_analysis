@@ -5,7 +5,7 @@
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { AppState } from '@/src/types/app'
+import type { AppState } from '@/src/types/api.types'
 
 export const useAppStore = create<AppState>()(
     persist(

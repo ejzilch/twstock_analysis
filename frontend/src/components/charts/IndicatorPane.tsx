@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useRef } from 'react'
-import type { CandleItem } from '@/src/types/api.generated'
+import type { CandleItem } from '@/src/types/api.types'
 import { Time } from 'lightweight-charts';
 import { BASE_INDICATOR_COLORS, ColorMode, getThemedIndicatorColor } from '@/src/constants/chartColors'
 import { ChartSyncHandle } from '@/src/hooks/useChartSync'

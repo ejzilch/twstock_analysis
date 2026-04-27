@@ -20,7 +20,7 @@ import { ApiErrorException } from '@/src/lib/api-client'
 import { SelectedSymbolTags } from './SelectedSymbolTags'
 import { SyncProgress } from './SyncProgress'
 import { SyncResult } from './SyncResult'
-import type { SymbolItem } from '@/src/types/api.generated'
+import type { SymbolItem } from '@/src/types/api.types'
 import { useQueryClient } from '@tanstack/react-query'
 
 // 前 10 大市值股票代號（由 EJ 於 04-25 確認後更新）

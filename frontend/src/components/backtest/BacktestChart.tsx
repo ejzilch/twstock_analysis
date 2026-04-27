@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { apiClient, buildQueryString } from '@/src/lib/api-client'
 import { CandleChart } from '@/src/components/charts/CandleChart'
 import { Card, LoadingSpinner, ErrorToast, Button } from '@/src/components/ui'
-import type { CandleItem, SignalItem, CandlesResponse } from '@/src/types/api.generated'
+import type { CandleItem, SignalItem, CandlesResponse } from '@/src/types/api.types'
 import { IndicatorToggle } from '@/src/components/charts/IndicatorToggle'
 
 interface BacktestChartProps {
@@ -133,7 +133,7 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
                 setCandles(candlesRes.candles)
                 setSignals(buildBacktestTradeSignals(candlesRes.candles, strategyName, exitFilterPct / 100))
                 setHasMore(candlesRes.next_cursor != null)
-                setCursor(candlesRes.next_cursor)
+                setCursor(candlesRes.next_cursor ?? null)
             })
             .catch(setError)
             .finally(() => setLoading(false))
@@ -153,7 +153,7 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
                 return merged
             })
             setHasMore(res.next_cursor != null)
-            setCursor(res.next_cursor)
+            setCursor(res.next_cursor ?? null)
         } catch (err) {
             setError(err)
         } finally {

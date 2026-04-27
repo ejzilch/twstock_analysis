@@ -22,7 +22,7 @@ import type {
   RateLimitInfo,
   SyncStatus,
   SyncStatusResponse,
-} from '@/src/types/api.generated'
+} from '@/src/types/api.types'
 
 // 輪詢間隔：同步狀態 1 秒；API quota 30 秒
 const SYNC_POLL_INTERVAL_MS = 1_000

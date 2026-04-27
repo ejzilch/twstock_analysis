@@ -1,4 +1,4 @@
-import type { SignalItem } from '@/src/types/api.generated'
+import type { SignalItem } from '@/src/types/api.types'
 import { ReliabilityBadge, Card } from '@/src/components/ui'
 import { useSignalTheme } from '@/src/hooks/useSignalTheme'
 

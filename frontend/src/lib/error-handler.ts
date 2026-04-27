@@ -2,7 +2,7 @@
  * Maps API error_code to UI behaviours.
  * No React imports — pure logic consumed by hooks and components.
  */
-import type { ErrorCode } from '@/src/types/api.generated'
+import type { ErrorCode } from '@/src/types/api.types'
 import { ApiErrorException } from './api-client'
 
 export type ToastVariant = 'info' | 'warning' | 'error' | 'silent'

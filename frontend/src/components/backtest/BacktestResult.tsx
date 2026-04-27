@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import type { BacktestResponse } from '@/src/types/api.generated'
+import type { BacktestResponse } from '@/src/types/api.types'
 import { formatCapital, formatPercent } from '@/src/lib/utils'
 import { Card } from '@/src/components/ui'
 import { MetricCard } from '@/src/components/backtest'

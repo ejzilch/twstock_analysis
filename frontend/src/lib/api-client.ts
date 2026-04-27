@@ -1,4 +1,4 @@
-import type { ApiError, ErrorCode } from '@/src/types/api.generated'
+import type { ApiError, ErrorCode } from '@/src/types/api.types'
 
 export class ApiErrorException extends Error {
     constructor(

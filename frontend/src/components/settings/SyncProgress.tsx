@@ -7,7 +7,7 @@
  */
 import { useState, useEffect } from 'react'
 import { clsx } from 'clsx'
-import type { RateLimitInfo, SymbolProgress } from '@/src/types/api.generated'
+import type { RateLimitInfo, SymbolProgress, GapProgress, SymbolSyncStatus } from '@/src/types/api.types'
 
 interface SyncProgressProps {
   progress: SymbolProgress[]
@@ -147,7 +147,7 @@ function SymbolProgressRow({ progress }: { progress: SymbolProgress }) {
   )
 }
 
-function GapProgressBar({ label, gap }: { label: string; gap: import('@/src/types/api.generated').GapProgress }) {
+function GapProgressBar({ label, gap }: { label: string; gap: GapProgress }) {
   const from = new Date(gap.from_ms).toLocaleDateString('zh-TW')
   const to = new Date(gap.to_ms).toLocaleDateString('zh-TW')
 
@@ -174,7 +174,7 @@ function GapProgressBar({ label, gap }: { label: string; gap: import('@/src/type
   )
 }
 
-function StatusPill({ status }: { status: import('@/src/types/api.generated').SymbolSyncStatus }) {
+function StatusPill({ status }: { status: SymbolSyncStatus }) {
   const config = {
     pending: { label: '等待中', className: 'bg-slate-500/15 text-slate-400' },
     running: { label: '執行中', className: 'bg-brand-500/15 text-brand-300' },

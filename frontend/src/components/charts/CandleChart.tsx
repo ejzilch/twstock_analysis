@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import type { CandleItem, SignalItem } from '@/src/types/api.generated'
+import type { CandleItem, SignalItem } from '@/src/types/api.types'
 import { Time, IChartApi, ISeriesApi } from 'lightweight-charts';
 import { useAppStore } from '@/src/store/useAppStore'
 import {
@@ -243,7 +243,7 @@ export function CandleChart({
         const toLineData = (key: string) =>
             candles
                 .filter((c) => c.indicators?.[key] != null && !isNaN(c.indicators[key] as number))
-                .map((c) => ({ time: (c.timestamp_ms / 1000) as Time, value: c.indicators[key] as number }))
+                .map((c) => ({ time: (c.timestamp_ms / 1000) as Time, value: c.indicators?.[key] as number }))
 
         s.ma5?.setData(show('ma5') ? toLineData('ma5') : [])
         s.ma20?.setData(show('ma20') ? toLineData('ma20') : [])
@@ -259,15 +259,15 @@ export function CandleChart({
             }
             s.bollUpper?.setData(bollCandles.map((c) => ({
                 time: (c.timestamp_ms / 1000) as Time,
-                value: (c.indicators['bollinger'] as Boll).upper
+                value: (c.indicators?.['bollinger'] as Boll).upper
             })))
             s.bollMid?.setData(bollCandles.map((c) => ({
                 time: (c.timestamp_ms / 1000) as Time,
-                value: (c.indicators['bollinger'] as Boll).middle
+                value: (c.indicators?.['bollinger'] as Boll).middle
             })))
             s.bollLower?.setData(bollCandles.map((c) => ({
                 time: (c.timestamp_ms / 1000) as Time,
-                value: (c.indicators['bollinger'] as Boll).lower
+                value: (c.indicators?.['bollinger'] as Boll).lower
             })))
         } else {
             s.bollUpper?.setData([])

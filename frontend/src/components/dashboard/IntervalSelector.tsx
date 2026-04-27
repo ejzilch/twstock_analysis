@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import type { Interval } from '@/src/types/api.generated'
+import type { Interval } from '@/src/types/api.types'
 import { useAppStore } from '@/src/store/useAppStore'
 
 const INTERVALS: { value: Interval; label: string }[] = [
