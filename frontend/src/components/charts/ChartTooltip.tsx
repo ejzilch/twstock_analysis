@@ -14,8 +14,8 @@ function fmt(n: number | null | undefined, decimals = 2): string {
 
 function fmtVolume(n: number | null | undefined): string {
     if (n == null) return '—'
-    if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M'
-    if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K'
+    // if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M'
+    if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K'
     return n.toFixed(0)
 }
 
@@ -115,11 +115,11 @@ export function CandleTooltip({
     const themedIndicatorColor = getThemedIndicatorColor(colorMode)
 
     const closeColor = useMemo(() => {
-        if (!data || data.open == null || data.close == null) return undefined
-        return data.close >= data.open ? candleColor.up : candleColor.down
+        if (!data || data.open == null || data.close == null || data.prevClose == null) return undefined
+        return data.close === data.prevClose ? candleColor.unchanged : data.close > data.prevClose ? candleColor.up : candleColor.down;
     }, [data])
 
-    const riseOrfall = useMemo(() => {
+    const upOrDown = useMemo(() => {
         if (!data || data.close == null) return null
         const base = data.prevClose ?? data.open
         if (base == null || base === 0) return null
@@ -152,21 +152,21 @@ export function CandleTooltip({
 
             {/* OHLCV */}
             <Field label="最高 Highest" value={fmt(data?.high)} />
-            <Field label="開盤 Open" value={fmt(data?.open)} />
             <Field label="最低 Lowest" value={fmt(data?.low)} />
+            <Field label="開盤 Open" value={fmt(data?.open)} />
             <Field label="收盤 Close" value={fmt(data?.close)} color={closeColor} />
-            {riseOrfall != null && (
+            {upOrDown != null && (
                 <Field
                     label="漲跌"
-                    value={`${riseOrfall >= 0 ? '+' : ''}${riseOrfall.toFixed(2)}`}
-                    color={riseOrfall >= 0 ? candleColor.up : candleColor.down}
+                    value={`${upOrDown >= 0 ? '+' : ''}${upOrDown.toFixed(2)}`}
+                    color={upOrDown === 0 ? candleColor.unchanged : upOrDown > 0 ? candleColor.up : candleColor.down}
                 />
             )}
             {changePct != null && (
                 <Field
                     label="漲跌%"
                     value={`${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`}
-                    color={changePct >= 0 ? candleColor.up : candleColor.down}
+                    color={changePct === 0 ? candleColor.unchanged : changePct > 0 ? candleColor.up : candleColor.down}
                 />
             )}
             {data?.volume != null && (
@@ -187,9 +187,9 @@ export function CandleTooltip({
             {hasBoll && (
                 <>
                     <Divider />
-                    <Field label="BB 上軌" value={fmt(boll!.upper)} color={themedIndicatorColor.bollUpper} />
-                    <Field label="BB 中軌" value={fmt(boll!.middle)} color={BASE_INDICATOR_COLORS.bollMid} />
-                    <Field label="BB 下軌" value={fmt(boll!.lower)} color={themedIndicatorColor.bollLower} />
+                    <Field label="BOLL 上軌" value={fmt(boll!.upper)} color={themedIndicatorColor.bollUpper} />
+                    <Field label="BOLL 中軌" value={fmt(boll!.middle)} color={BASE_INDICATOR_COLORS.bollMid} />
+                    <Field label="BOLL 下軌" value={fmt(boll!.lower)} color={themedIndicatorColor.bollLower} />
                 </>
             )}
         </AnchorPanel>

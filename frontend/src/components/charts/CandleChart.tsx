@@ -72,9 +72,14 @@ export function CandleChart({
             chartRef.current?.remove()
             chartRef.current = null
             seriesRef.current = {
-                candle: null, volume: null,
-                ma5: null, ma20: null, ma50: null,
-                bollUpper: null, bollMid: null, bollLower: null,
+                candle: null,
+                volume: null,
+                ma5: null,
+                ma20: null,
+                ma50: null,
+                bollUpper: null,
+                bollMid: null,
+                bollLower: null,
             }
 
             const chart = createChart(containerRef.current, {
@@ -104,15 +109,47 @@ export function CandleChart({
 
             chartRef.current = chart
 
-            seriesRef.current.candle = chart.addCandlestickSeries({ priceLineVisible: false })
-            seriesRef.current.ma5 = chart.addLineSeries({ color: BASE_INDICATOR_COLORS.ma5, lineWidth: 1, priceLineVisible: false })
-            seriesRef.current.ma20 = chart.addLineSeries({ color: BASE_INDICATOR_COLORS.ma20, lineWidth: 1, priceLineVisible: false })
-            seriesRef.current.ma50 = chart.addLineSeries({ color: BASE_INDICATOR_COLORS.ma50, lineWidth: 1, priceLineVisible: false })
+            seriesRef.current.candle = chart.addCandlestickSeries({
+                priceLineVisible: false
+            })
 
-            const bollOpts = { lineWidth: 1 as const, lineStyle: LineStyle.Dashed, priceLineVisible: false }
-            seriesRef.current.bollUpper = chart.addLineSeries({ ...bollOpts, color: themedIndicatorColor.bollUpper })
-            seriesRef.current.bollMid = chart.addLineSeries({ ...bollOpts, color: BASE_INDICATOR_COLORS.bollMid })
-            seriesRef.current.bollLower = chart.addLineSeries({ ...bollOpts, color: themedIndicatorColor.bollLower })
+            seriesRef.current.ma5 = chart.addLineSeries({
+                color: BASE_INDICATOR_COLORS.ma5,
+                lineWidth: 1,
+                priceLineVisible: false,
+                lastValueVisible: false,
+            })
+            seriesRef.current.ma20 = chart.addLineSeries({
+                color: BASE_INDICATOR_COLORS.ma20,
+                lineWidth: 1,
+                priceLineVisible: false,
+                lastValueVisible: false,
+            })
+            seriesRef.current.ma50 = chart.addLineSeries({
+                color: BASE_INDICATOR_COLORS.ma50,
+                lineWidth: 1,
+                priceLineVisible: false,
+                lastValueVisible: false,
+            })
+
+            const bollOpts = {
+                lineWidth: 1 as const,
+                lineStyle: LineStyle.Dashed,
+                priceLineVisible: false,
+                lastValueVisible: false,
+            }
+            seriesRef.current.bollUpper = chart.addLineSeries({
+                ...bollOpts,
+                color: themedIndicatorColor.bollUpper
+            })
+            seriesRef.current.bollMid = chart.addLineSeries({
+                ...bollOpts,
+                color: BASE_INDICATOR_COLORS.bollMid
+            })
+            seriesRef.current.bollLower = chart.addLineSeries({
+                ...bollOpts,
+                color: themedIndicatorColor.bollLower
+            })
 
             if (showVolume) {
                 seriesRef.current.volume = chart.addHistogramSeries({
@@ -159,13 +196,13 @@ export function CandleChart({
         const s = seriesRef.current
         if (!s.candle || candles.length === 0) return
 
-        const { up, down, upVolume, downVolume } = getCandleColors(colorMode)
+        const { up, down, upVolume, unchanged, downVolume } = getCandleColors(colorMode)
         const show = (key: string) => !visibleIndicators || visibleIndicators.has(key)
 
         // Candlestick
         s.candle.setData(candles.map((c, idx) => {
-            const prevClose = idx > 0 ? candles[idx - 1].close : c.open
-            const isUp = c.close >= prevClose
+            // const prevClose = idx > 0 ? candles[idx - 1].close : c.open
+            const isUp = c.close > c.open
             const color = isUp ? up : down
             return {
                 time: (c.timestamp_ms / 1000) as Time,
@@ -177,7 +214,7 @@ export function CandleChart({
         // 把完整 candle（含 OHLCV、volume、indicators）餵進 sync，
         // 讓任意子圖（RSI/MACD）觸發 crosshair 時都能查到完整資料。
         if (sync) {
-            ; (sync as any).feedCandleMap?.(candles)
+            (sync as any).feedCandleMap?.(candles)
         }
 
         // Markers
@@ -215,10 +252,23 @@ export function CandleChart({
         // Bollinger
         if (show('bollinger')) {
             const bollCandles = candles.filter((c) => c.indicators?.['bollinger'] != null)
-            type Boll = { upper: number; middle: number; lower: number }
-            s.bollUpper?.setData(bollCandles.map((c) => ({ time: (c.timestamp_ms / 1000) as Time, value: (c.indicators['bollinger'] as Boll).upper })))
-            s.bollMid?.setData(bollCandles.map((c) => ({ time: (c.timestamp_ms / 1000) as Time, value: (c.indicators['bollinger'] as Boll).middle })))
-            s.bollLower?.setData(bollCandles.map((c) => ({ time: (c.timestamp_ms / 1000) as Time, value: (c.indicators['bollinger'] as Boll).lower })))
+            type Boll = {
+                upper: number;
+                middle: number;
+                lower: number
+            }
+            s.bollUpper?.setData(bollCandles.map((c) => ({
+                time: (c.timestamp_ms / 1000) as Time,
+                value: (c.indicators['bollinger'] as Boll).upper
+            })))
+            s.bollMid?.setData(bollCandles.map((c) => ({
+                time: (c.timestamp_ms / 1000) as Time,
+                value: (c.indicators['bollinger'] as Boll).middle
+            })))
+            s.bollLower?.setData(bollCandles.map((c) => ({
+                time: (c.timestamp_ms / 1000) as Time,
+                value: (c.indicators['bollinger'] as Boll).lower
+            })))
         } else {
             s.bollUpper?.setData([])
             s.bollMid?.setData([])
@@ -228,11 +278,13 @@ export function CandleChart({
         // Volume
         s.volume?.setData(candles.map((c, idx) => {
             const prevClose = idx > 0 ? candles[idx - 1].close : c.open
-            const isUp = c.close >= prevClose
+            const isUp = c.close > prevClose
+            const isUnchanged = prevClose === c.close
+            const volumeColor = isUnchanged ? unchanged : isUp ? upVolume : downVolume;
             return {
                 time: (c.timestamp_ms / 1000) as Time,
                 value: c.volume,
-                color: isUp ? upVolume : downVolume,
+                color: volumeColor,
             }
         }))
 
