@@ -15,13 +15,15 @@ export type ColorMode = 'TW' | 'US'
 export interface CandleColorSet {
     up: string   // 上漲實體 + 影線
     down: string   // 下跌實體 + 影線
-    upVolume: string   // 上漲成交量
-    downVolume: string  // 下跌成交量
+    unchanged: string // 收盤持平顏色
+    upVolume: string   // 收盤上漲成交量
+    downVolume: string  // 收盤下跌成交量
 }
 
 const TW_COLORS: CandleColorSet = {
     up: '#ef4444',
     down: '#10b981',
+    unchanged: '#6d6868',
     upVolume: 'rgba(239,68,68,0.4)',
     downVolume: 'rgba(16,185,129,0.4)',
 }
@@ -29,6 +31,7 @@ const TW_COLORS: CandleColorSet = {
 const US_COLORS: CandleColorSet = {
     up: '#10b981',
     down: '#ef4444',
+    unchanged: '#6d6868',
     upVolume: 'rgba(16,185,129,0.4)',
     downVolume: 'rgba(239,68,68,0.4)',
 }
