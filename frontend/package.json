@@ -4,11 +4,11 @@
     "private": true,
     "scripts": {
         "dev": "next dev",
-        "build": "next build",
         "start": "next start",
         "lint": "next lint",
-        "type-check": "tsc --noEmit",
-        "gen:types": "npx openapi-typescript ./docs/openapi.yaml -o src/types/api.generated.ts"
+        "gen-api": "npx openapi-typescript ../docs/api/openapi.yaml -o ./src/types/api.generated.ts",
+        "build": "npm run gen-api && next build",
+        "type-check": "tsc --noEmit"
     },
     "dependencies": {
         "@tanstack/react-query": "^5.28.0",

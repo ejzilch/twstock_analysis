@@ -9,7 +9,7 @@
  */
 import { useState, useRef, useEffect } from 'react'
 import { clsx } from 'clsx'
-import type { SymbolItem } from '@/src/types/api.generated'
+import type { SymbolItem } from '@/src/types/api.types'
 
 interface SymbolSearchInputProps {
   /** 父層傳入的完整股票清單（來自 useSymbols）*/

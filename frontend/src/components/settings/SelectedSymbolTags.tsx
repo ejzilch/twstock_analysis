@@ -1,12 +1,10 @@
 'use client'
 /**
- * src/components/settings/SelectedSymbolTags.tsx
- *
  * 已選股票標籤列表，每個標籤含移除按鈕。
  * 純 props，無任何 API 或 store 依賴。
  */
 import { clsx } from 'clsx'
-import type { SymbolItem } from '@/src/types/api.generated'
+import type { SymbolItem } from '@/src/types/api.types'
 
 interface SelectedSymbolTagsProps {
   selected: SymbolItem[]

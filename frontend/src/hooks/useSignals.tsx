@@ -2,9 +2,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiClient, buildQueryString } from '@/src/lib/api-client'
 import { useFocusPolling } from './useFocusPolling'
-import type {
-    SignalsResponse,
-} from '@/src/types/api.generated'
+import type { SignalsResponse } from '@/src/types/api.types'
 
 interface UseSignalsParams {
     symbol: string

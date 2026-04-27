@@ -2,9 +2,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/src/lib/api-client'
 
-import type {
-    SymbolsResponse,
-} from '@/src/types/api.generated'
+import type { SymbolsResponse } from '@/src/types/api.types'
 
 export function useSymbols() {
     return useQuery<SymbolsResponse>({

@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { clsx } from 'clsx'
-import type { SymbolItem } from '@/src/types/api.generated'
+import type { SymbolItem } from '@/src/types/api.types'
 import { Card, Input } from '@/src/components/ui'
 import { StockRow } from './StockRow'
 

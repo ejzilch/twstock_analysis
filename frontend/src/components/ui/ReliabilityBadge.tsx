@@ -1,6 +1,6 @@
-import type { ReliabilityLevel } from '@/src/types/api.generated'
+import type { ReliabilityLevel } from '@/src/types/api.types'
 import { clsx } from 'clsx'
-import { RELIABILITY_BADGE } from '@/src/types/app'
+import { RELIABILITY_BADGE } from '@/src/types/api.types'
 
 interface BadgeProps { reliability: ReliabilityLevel }
 

@@ -6,7 +6,7 @@
  * 純 props，無任何 API 或 store 依賴。
  */
 import { clsx } from 'clsx'
-import type { SymbolProgress, SyncSummary } from '@/src/types/api.generated'
+import type { SymbolProgress, SyncSummary } from '@/src/types/api.types'
 
 interface SyncResultProps {
   progress: SymbolProgress[]

@@ -1,7 +1,6 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import type { CrosshairData, ChartSyncHandle } from '@/src/hooks/useChartSync'
-import { } from '@/src/constants/chartColors'
 import type { ColorMode, ThemedIndicatorColorsSet } from '@/src/constants/chartColors'
 import { getCandleColors, getThemedIndicatorColor, BASE_INDICATOR_COLORS } from '@/src/constants/chartColors'
 

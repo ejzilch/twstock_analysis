@@ -1,5 +1,5 @@
 'use client'
-import type { SymbolItem, SignalItem, Interval } from '@/src/types/api.generated'
+import type { SymbolItem } from '@/src/types/api.types'
 import { useAppStore } from '@/src/store/useAppStore'
 import { useSymbols } from '@/src/hooks'
 

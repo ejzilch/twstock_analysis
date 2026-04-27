@@ -2,10 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/src/lib/api-client'
 import { generateRequestId } from '@/src/lib/utils'
 
-import type {
-    BacktestResponse,
-    BacktestRequest,
-} from '@/src/types/api.generated'
+import type { BacktestResponse, BacktestRequest } from '@/src/types/api.types'
 
 export function useBacktest() {
     const queryClient = useQueryClient()

@@ -3,7 +3,6 @@ import { useState } from 'react'
 import BacktestDateRangePicker from '@/src/components/features/backtest/BacktestDateRangePicker'
 import { Input, Select, Card, Button } from '@/src/components/ui'
 import { useSymbols } from '@/src/hooks'
-import { DateValueType } from "react-tailwindcss-datepicker"
 
 interface StrategyFormProps {
     onSubmit: (params: {

@@ -188,7 +188,7 @@ interface AppState {
 export type CandleResponse = components['schemas']['Candle']
 export type SignalResponse = components['schemas']['TradeSignal']
 
-// app.ts — 手寫業務衍生型別，從 generated 組合
+// api.types.ts — 手寫業務衍生型別，從 generated 組合
 import type { CandleResponse } from './api.generated'
 export type CandleWithIndicators = CandleResponse & {
   indicators: Record<string, number | MacdValue>

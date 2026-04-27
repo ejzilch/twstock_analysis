@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import type { SymbolItem } from '@/src/types/api.generated'
+import type { SymbolItem } from '@/src/types/api.types'
 
 interface StockRowProps { symbol: SymbolItem }
 
