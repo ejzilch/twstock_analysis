@@ -788,6 +788,7 @@ components:
         - to_ms
         - initial_capital
         - position_size_percent
+        - exit_filter_pct
       properties:
         request_id:
           type: string
@@ -810,6 +811,9 @@ components:
           format: double
           minimum: 1.0
           maximum: 100.0
+        exit_filter_pct:
+          type: number
+          format: double
 
     BacktestResponse:
       type: object
@@ -823,6 +827,7 @@ components:
         - final_capital
         - metrics
         - created_at_ms
+        - exit_filter_pct
       properties:
         backtest_id:
           type: string
@@ -847,6 +852,9 @@ components:
         created_at_ms:
           type: integer
           format: int64
+        exit_filter_pct:
+          type: number
+          format: double
 
     BacktestMetrics:
       type: object
