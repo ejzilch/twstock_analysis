@@ -198,7 +198,7 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
             <CandleChart
                 candles={candles}
                 signals={signals}
-                height={400}
+                height={450}
                 showVolume={false}
                 markerTextMode="signalOnly"
                 visibleIndicators={visibleIndicators}
