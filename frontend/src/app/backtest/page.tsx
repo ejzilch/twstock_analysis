@@ -66,6 +66,7 @@ export default function BacktestPage() {
                                 from_ms={backtest.data.from_ms}
                                 to_ms={backtest.data.to_ms}
                                 exitFilterPct={backtest.data.exit_filter_pct}
+                                trades={backtest.data.trades}
                             />
                         ) : (
                             <Card className="flex items-center justify-center h-full min-h-[400px]">

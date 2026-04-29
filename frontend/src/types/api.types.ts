@@ -18,6 +18,8 @@ export type SymbolsResponse = Schemas['SymbolsResponse']
 export type BacktestRequest = Schemas['BacktestRequest']
 export type BacktestResponse = Schemas['BacktestResponse']
 
+export type TradeRecord = Schemas['TradeRecord']
+
 // ── Enums ─────────────────────────────────────────────────────────────────────
 export type Interval = '1m' | '5m' | '15m' | '1h' | '4h' | '1d'
 export type Exchange = 'TWSE' | 'TPEX'
