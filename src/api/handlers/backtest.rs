@@ -1,11 +1,16 @@
 use crate::api::middleware::ApiError;
 use crate::app_state::AppState;
 use crate::constants::{
-    BANDWIDTH_HIGH_PERCENTILE, BANDWIDTH_LOOKBACK, BANDWIDTH_LOW_PERCENTILE,
-    DEFAULT_AVG_CONSECUTIVE_LOSSES, TF_MA_LONG, TF_MA_MID, TF_MA_SHORT, TF_RSI_OVERBOUGHT,
-    TF_RSI_PERIOD, TF_WEAK_SIGNAL_POSITION_RATIO,
+    BANDWIDTH_HIGH_PERCENTILE, BANDWIDTH_LOOKBACK, BANDWIDTH_LOW_PERCENTILE, BOLL_PERIOD,
+    BOLL_STD_MULTIPLIER, BO_MACD_FAST, BO_MACD_SIGNAL, BO_MACD_SLOW, BO_RSI_OVERBOUGHT,
+    DEFAULT_AVG_CONSECUTIVE_LOSSES, MR_MA50_TOLERANCE, MR_RSI_NEUTRAL_MAX, MR_RSI_OVERSOLD,
+    RSI_PERIOD, TF_MA_LONG, TF_MA_MID, TF_MA_SHORT, TF_RSI_OVERBOUGHT,
+    TF_WEAK_SIGNAL_POSITION_RATIO,
 };
-use crate::core::indicators::{ma::compute_sma, rsi::compute_rsi};
+use crate::core::indicators::{
+    bollinger::compute_bollinger, ma::compute_sma, macd::compute_macd, rsi::compute_rsi,
+};
+use crate::models::candle::MacdValue;
 use axum::{extract::State, Json};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -57,6 +62,23 @@ pub struct BacktestMetrics {
     pub max_consecutive_wins: u32,
 }
 
+/// 單筆交易記錄
+#[derive(Debug, Serialize)]
+pub struct TradeRecord {
+    /// 進場時間戳（毫秒）
+    pub entry_timestamp_ms: i64,
+    /// 出場時間戳（毫秒）
+    pub exit_timestamp_ms: i64,
+    /// 進場價格
+    pub entry_price: f64,
+    /// 出場價格
+    pub exit_price: f64,
+    /// 損益金額
+    pub net_pnl: f64,
+    /// 是否獲利
+    pub is_win: bool,
+}
+
 /// POST /api/v1/backtest 的完整回應
 #[derive(Debug, Serialize)]
 pub struct BacktestResponse {
@@ -69,6 +91,9 @@ pub struct BacktestResponse {
     pub final_capital: f64,
     pub metrics: BacktestMetrics,
     pub created_at_ms: i64,
+    pub exit_filter_pct: f64,
+    /// 每筆交易記錄，供前端 K 線圖標記使用
+    pub trades: Vec<TradeRecord>,
 }
 
 #[derive(Debug, FromRow, Clone)]
@@ -122,13 +147,6 @@ pub async fn backtest_handler(
     State(state): State<Arc<AppState>>,
     Json(request): Json<BacktestRequest>,
 ) -> Result<Json<BacktestResponse>, ApiError> {
-    tracing::info!(
-        request_id = %request.request_id,
-        symbol = %request.symbol,
-        strategy = %request.strategy_name,
-        "Backtest request received"
-    );
-
     // 基本參數驗證
     if request.initial_capital <= 0.0 {
         return Err(ApiError::InvalidIndicatorConfig {
@@ -188,7 +206,10 @@ pub async fn backtest_handler(
     // 解析最短持倉天數
     let min_holding_days = match request.min_holding_days {
         Some(v) => v,
-        None => DEFAULT_MIN_HOLDING_DAYS,
+        None => match request.strategy_name.as_str() {
+            "mean_reversion_v1" => 2,      // 均值回歸縮短為 2 天
+            _ => DEFAULT_MIN_HOLDING_DAYS, // 其他維持 5 天
+        },
     };
 
     // ── Units-based 持倉模型 ──────────────────────────────────────────────────
@@ -224,13 +245,23 @@ pub async fn backtest_handler(
     // ── 回測開始前，預算整個 K 線序列的帶寬 ──
     let bandwidth_series = compute_bandwidth_series(&candles);
 
-    // MA 序列（trend_follow_v1 用）
-    let ma5_series = compute_sma(&closes, TF_MA_SHORT); // 現有函數直接復用
-    let ma20_series = compute_sma(&closes, TF_MA_MID);
-    let ma50_series = compute_sma(&closes, TF_MA_LONG);
+    // MA 序列（共用）
+    let ma5_series: Vec<f64> = compute_sma(&closes, TF_MA_SHORT); // 現有函數直接復用
+    let ma20_series: Vec<f64> = compute_sma(&closes, TF_MA_MID);
+    let ma50_series: Vec<f64> = compute_sma(&closes, TF_MA_LONG);
 
-    // RSI 序列（trend_follow_v1 出場用）
-    let rsi_series = compute_rsi(&closes, TF_RSI_PERIOD); // 現有函數直接復用
+    // RSI 序列（共用）
+    let rsi_series = compute_rsi(&closes, RSI_PERIOD); // 現有函數直接復用
+
+    // Bollinger Bands（共用）
+    let boll_series: Vec<(f64, f64, f64)> =
+        compute_bollinger(&closes, BOLL_PERIOD, BOLL_STD_MULTIPLIER);
+
+    let macd_series: Vec<MacdValue> =
+        compute_macd(&closes, BO_MACD_FAST, BO_MACD_SLOW, BO_MACD_SIGNAL);
+
+    let mut trades: Vec<TradeRecord> = Vec::new();
+    let mut entry_timestamp_ms: i64 = 0;
 
     // 訊號在第 i 日收盤確認，第 i+1 日收盤成交（Look-ahead Bias 已修正）
     for i in 1..candles.len().saturating_sub(1) {
@@ -250,7 +281,7 @@ pub async fn backtest_handler(
         if exec_close <= 0.0 || prev_exec_close <= 0.0 {
             continue;
         }
-
+        // match 之前
         // ── 依策略取得進出場訊號 ────────────────────────────────────────────
         let (should_hold, actual_position_fraction) = match request.strategy_name.as_str() {
             "trend_follow_v1" => {
@@ -273,7 +304,40 @@ pub async fn backtest_handler(
                     (strength != TrendSignalStrength::None, fraction)
                 }
             }
+            "mean_reversion_v1" => {
+                let close = candles[i].close;
+                let ma50 = ma50_series[i];
+                let rsi = rsi_series[i];
+                let (_, _boll_middle, boll_lower) = boll_series[i];
 
+                let hold = mean_reversion_should_enter(close, ma50, rsi, boll_lower);
+                (hold, position_fraction) // 均值回歸不分層，固定全倉
+            }
+            "breakout_v1" => {
+                if i < 1 {
+                    (false, 0.0)
+                } else {
+                    let close = candles[i].close;
+                    let (boll_upper, _, _) = boll_series[i];
+                    let rsi = rsi_series[i];
+
+                    // 取當日與前日 MACD histogram
+                    let macd_curr = &macd_series[i];
+                    let macd_prev = &macd_series[i - 1];
+                    if !macd_curr.macd_line.is_nan() && !macd_prev.macd_line.is_nan() {
+                        let hold = breakout_should_enter(
+                            close,
+                            boll_upper,
+                            macd_curr.histogram,
+                            macd_prev.histogram,
+                            rsi,
+                        );
+                        (hold, position_fraction)
+                    } else {
+                        (false, 0.0) // MACD 資料不足時不進場
+                    }
+                }
+            }
             // 其他策略維持現有邏輯，fraction 固定用 position_fraction
             _ => {
                 let hold = should_hold_position(&request.strategy_name, &candles, i);
@@ -285,7 +349,25 @@ pub async fn backtest_handler(
         // trend_follow_v1 用新的出場邏輯，其他策略維持現有
         let strategy_wants_exit = match request.strategy_name.as_str() {
             "trend_follow_v1" => {
-                trend_follow_should_exit(&ma5_series, &ma20_series, &rsi_series, i)
+                trend_follow_should_exit(&ma5_series, &ma20_series, &ma50_series, &rsi_series, i)
+            }
+            "mean_reversion_v1" => {
+                let close = candles[i].close;
+                let ma50 = ma50_series[i];
+                let (_, boll_middle, _) = boll_series[i];
+
+                mean_reversion_should_exit(close, ma50, boll_middle)
+            }
+            "breakout_v1" => {
+                let close = candles[i].close;
+                let (boll_upper, _, _) = boll_series[i];
+                let macd_curr = &macd_series[i];
+
+                if macd_curr.macd_line.is_nan() {
+                    false // 資料不足時不觸發出場
+                } else {
+                    breakout_should_exit(close, boll_upper, macd_curr.histogram)
+                }
             }
             _ => !should_hold,
         };
@@ -312,9 +394,14 @@ pub async fn backtest_handler(
         // ── 出場條件：(訊號轉空 AND 跌幅達閾值 AND 滿最短持倉) OR 硬停損 ──────
         let can_exit = holding_days >= min_holding_days;
 
-        // 現有的出場條件組合（exit_filter、min_holding_days、hard_stop）維持不變
-        // 只是把 !should_hold 換成 strategy_wants_exit
-        let signal_exit = strategy_wants_exit && drop_ratio >= exit_filter_threshold && can_exit;
+        // 現有的出場條件組合
+        let signal_exit = match request.strategy_name.as_str() {
+            // mean_reversion breakout 出場不需要 drop_ratio 過濾
+            // 只需要 can_exit（最短持倉天數）
+            "mean_reversion_v1" | "breakout_v1" => strategy_wants_exit && can_exit,
+            // 其他策略維持原本的 drop_ratio + can_exit 雙重條件
+            _ => strategy_wants_exit && drop_ratio >= exit_filter_threshold && can_exit,
+        };
         let should_exit = (signal_exit || hard_stop_triggered) && in_position;
 
         // ── 進場：用 actual_position_fraction 取代固定的 position_fraction ──
@@ -324,6 +411,7 @@ pub async fn backtest_handler(
             // buy_fee          = capital_deployed × COMMISSION_RATE（買進手續費）
             // units            = capital_deployed / exec_close（實際可買的股數）
             // equity 扣除 buy_fee 後剩餘閒置資金部分不動
+            entry_timestamp_ms = candles[i + 1].timestamp_ms; // 執行日
             let capital_deployed = equity * actual_position_fraction; // 強弱倉位分層
             let buy_fee = capital_deployed * COMMISSION_RATE;
             position_units = capital_deployed / exec_close;
@@ -394,6 +482,15 @@ pub async fn backtest_handler(
             if hard_stop_triggered {
                 tracing::debug!(entry_price, exec_close, "Hard stop-loss triggered");
             }
+
+            trades.push(TradeRecord {
+                entry_timestamp_ms,
+                exit_timestamp_ms: candles[i + 1].timestamp_ms,
+                entry_price,
+                exit_price: exec_close,
+                net_pnl,
+                is_win: net_pnl >= 0.0,
+            });
         }
 
         // ── 每日報酬：持倉中以「部位市值變化 / 總 equity」計算 ──────────────────
@@ -454,6 +551,15 @@ pub async fn backtest_handler(
                 max_consecutive_loss_amount = current_loss_streak_amount;
             }
         }
+
+        trades.push(TradeRecord {
+            entry_timestamp_ms,
+            exit_timestamp_ms: candles.last().map(|c| c.timestamp_ms).unwrap_or(0),
+            entry_price,
+            exit_price: last_close,
+            net_pnl,
+            is_win: net_pnl >= 0.0,
+        });
     }
 
     // 末日平倉結束後，收尾連虧區間
@@ -503,6 +609,8 @@ pub async fn backtest_handler(
         to_ms: request.to_ms,
         initial_capital: request.initial_capital,
         final_capital: equity,
+        exit_filter_pct: exit_filter_threshold * 100.0,
+        trades,
         metrics: BacktestMetrics {
             total_trades,
             winning_trades,
@@ -616,6 +724,7 @@ fn trend_follow_signal_strength(
 fn trend_follow_should_exit(
     ma5_series: &[f64],
     ma20_series: &[f64],
+    ma50_series: &[f64],
     rsi_series: &[f64],
     idx: usize,
 ) -> bool {
@@ -625,15 +734,17 @@ fn trend_follow_should_exit(
 
     let ma5 = ma5_series[idx];
     let ma20 = ma20_series[idx];
+    let ma50 = ma50_series[idx];
     let rsi = rsi_series[idx];
     let rsi_prev = rsi_series[idx - 1];
 
-    if !ma5.is_finite() || !ma20.is_finite() {
+    if !ma5.is_finite() || !ma20.is_finite() || !ma50.is_finite() {
         return false;
     }
 
-    // 條件一：MA5 跌破 MA20，短期動能轉弱
-    if ma5 < ma20 {
+    // 條件一：MA5 跌破 MA20 且 MA20 也跌破 MA50
+    // 雙重確認趨勢真的結束，不是短期震盪
+    if ma5 < ma20 && ma20 < ma50 {
         return true;
     }
 
@@ -643,6 +754,109 @@ fn trend_follow_should_exit(
         if rsi > TF_RSI_OVERBOUGHT && rsi < rsi_prev {
             return true;
         }
+    }
+
+    false
+}
+
+/// mean_reversion_v1 專用：判斷是否符合進場條件
+///
+/// L1 趨勢過濾：收盤 > MA50（多頭環境）且 RSI < MR_RSI_NEUTRAL_MAX
+/// L2 進場訊號：收盤跌破 Bollinger 下軌 且 RSI < MR_RSI_OVERSOLD
+fn mean_reversion_should_enter(close: f64, ma50: f64, rsi: f64, boll_lower: f64) -> bool {
+    // 任一指標無效時不進場
+    if !ma50.is_finite() || !rsi.is_finite() || !boll_lower.is_finite() {
+        return false;
+    }
+
+    // L1：多頭環境過濾
+    if close <= ma50 * MR_MA50_TOLERANCE {
+        return false; // 收盤在 MA50 之下，空頭環境不接刀
+    }
+    if rsi >= MR_RSI_NEUTRAL_MAX {
+        return false; // RSI 中性偏強區間，均值回歸無意義
+    }
+
+    // L2：雙重確認進場
+    let below_lower_band = close < boll_lower;
+    let oversold = rsi < MR_RSI_OVERSOLD;
+
+    below_lower_band && oversold
+}
+
+/// mean_reversion_v1 專用：判斷是否應該出場
+///
+/// 條件一：收盤回到 Bollinger 中軌（MA20）→ 均值回歸完成
+/// 條件二：收盤跌破 MA50 → 大趨勢轉壞，立即出場
+fn mean_reversion_should_exit(close: f64, ma50: f64, boll_middle: f64) -> bool {
+    if !ma50.is_finite() || !boll_middle.is_finite() {
+        return false;
+    }
+
+    // 條件一：均值回歸完成
+    if close >= boll_middle {
+        return true;
+    }
+
+    // 條件二：大趨勢轉壞
+    if close < ma50 * MR_MA50_TOLERANCE {
+        return true;
+    }
+
+    false
+}
+
+/// breakout_v1 專用：判斷是否符合進場條件
+///
+/// L2 進場訊號：
+///   收盤站上 Bollinger 上軌（收盤確認，非刺穿）
+///   MACD histogram > 0 且 > 前日 histogram（動能擴大）
+///   RSI < BO_RSI_OVERBOUGHT（未過熱）
+fn breakout_should_enter(
+    close: f64,
+    boll_upper: f64,
+    macd_histogram: f64,
+    macd_histogram_prev: f64,
+    rsi: f64,
+) -> bool {
+    // 任一指標無效時不進場
+    if !boll_upper.is_finite()
+        || !macd_histogram.is_finite()
+        || !macd_histogram_prev.is_finite()
+        || !rsi.is_finite()
+    {
+        return false;
+    }
+
+    // 收盤站上布林上軌（收盤確認，非盤中刺穿）
+    let above_upper_band = close > boll_upper;
+
+    // MACD histogram 為正且擴大（動能支撐突破）
+    let macd_expanding = macd_histogram > 0.0 && macd_histogram > macd_histogram_prev;
+
+    // RSI 未過熱（避免追在頂部）
+    let not_overbought = rsi < BO_RSI_OVERBOUGHT;
+
+    above_upper_band && macd_expanding && not_overbought
+}
+
+/// breakout_v1 專用：判斷是否應該出場
+///
+/// 條件一：收盤跌回 Bollinger 上軌之下 → 突破失敗
+/// 條件二：MACD histogram 轉負 → 動能耗盡
+fn breakout_should_exit(close: f64, boll_upper: f64, macd_histogram: f64) -> bool {
+    if !boll_upper.is_finite() || !macd_histogram.is_finite() {
+        return false;
+    }
+
+    // 條件一：突破失敗，收盤跌回上軌之下
+    if close < boll_upper {
+        return true;
+    }
+
+    // 條件二：動能耗盡
+    if macd_histogram < 0.0 {
+        return true;
     }
 
     false

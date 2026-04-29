@@ -828,6 +828,7 @@ components:
         - metrics
         - created_at_ms
         - exit_filter_pct
+        - trades
       properties:
         backtest_id:
           type: string
@@ -855,6 +856,11 @@ components:
         exit_filter_pct:
           type: number
           format: double
+        trades:
+          type: array
+          description: 每筆交易記錄，供前端 K 線圖標記使用
+          items:
+            $ref: '#/components/schemas/TradeRecord'
 
     BacktestMetrics:
       type: object
@@ -917,6 +923,39 @@ components:
           format: int32
           minimum: 0
           description: 回測期間最長連續獲利筆數
+    TradeRecord:
+      type: object
+      required:
+        - entry_timestamp_ms
+        - exit_timestamp_ms
+        - entry_price
+        - exit_price
+        - net_pnl
+        - is_win
+      properties:
+        entry_timestamp_ms:
+          type: integer
+          format: int64
+          description: 進場時間戳（毫秒）
+        exit_timestamp_ms:
+          type: integer
+          format: int64
+          description: 出場時間戳（毫秒）
+        entry_price:
+          type: number
+          format: double
+          description: 進場價格
+        exit_price:
+          type: number
+          format: double
+          description: 出場價格
+        net_pnl:
+          type: number
+          format: double
+          description: 淨損益金額（TWD，含手續費與交易稅）
+        is_win:
+          type: boolean
+          description: 是否獲利（net_pnl >= 0）
 
     # ── Error ─────────────────────────────────────────────────────────────────
 
