@@ -9,7 +9,7 @@ use crate::api::handlers::admin_sync::{
 
 use crate::api::{
     handlers::{
-        backtest::backtest_handler,
+        backtest::engine::backtest_handler,
         candles::candles_handler,
         health::{health_handler, integrity_handler},
         indicators::compute_indicators_handler,

@@ -59,19 +59,19 @@ impl SyncState {
         self.status.is_in_progress()
     }
 
-    pub fn update_gap_a(&mut self, symbol: &str, gap: GapProgress) {
+    pub fn _update_gap_a(&mut self, symbol: &str, gap: GapProgress) {
         if let Some(p) = self.progress.iter_mut().find(|p| p.symbol == symbol) {
             p.gap_a = Some(gap);
         }
     }
 
-    pub fn update_gap_b(&mut self, symbol: &str, gap: GapProgress) {
+    pub fn _update_gap_b(&mut self, symbol: &str, gap: GapProgress) {
         if let Some(p) = self.progress.iter_mut().find(|p| p.symbol == symbol) {
             p.gap_b = Some(gap);
         }
     }
 
-    pub fn mark_symbol_completed(&mut self, symbol: &str) {
+    pub fn _mark_symbol_completed(&mut self, symbol: &str) {
         if let Some(p) = self.progress.iter_mut().find(|p| p.symbol == symbol) {
             p.status = SymbolSyncStatus::Completed;
         }
@@ -82,7 +82,7 @@ impl SyncState {
             .count();
     }
 
-    pub fn add_counts(&mut self, inserted: i32, skipped: i32, failed: i32) {
+    pub fn _add_counts(&mut self, inserted: i32, skipped: i32, failed: i32) {
         self.summary.total_inserted += inserted;
         self.summary.total_skipped += skipped;
         self.summary.total_failed += failed;

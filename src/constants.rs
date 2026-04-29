@@ -42,9 +42,6 @@ pub const FINMIND_RATE_LIMIT_PER_HOUR: u32 = 600;
 /// 實際觸發等待的閾值為：FINMIND_RATE_LIMIT_PER_HOUR - FINMIND_RATE_LIMIT_BUFFER = 590
 pub const FINMIND_RATE_LIMIT_BUFFER: u32 = 10;
 
-/// Rate limit 觸發後等待時間（秒）：1 小時
-pub const FINMIND_RATE_LIMIT_WAIT_SECS: u64 = 3_600;
-
 /// 手動補資料每批請求天數（約一個月）
 pub const MANUAL_SYNC_BATCH_DAYS: u32 = 30;
 
@@ -136,11 +133,9 @@ pub const MR_RSI_OVERSOLD: f64 = 45.0;
 /// mean_reversion_v1：RSI 中性區上限，高於此值不做均值回歸
 pub const MR_RSI_NEUTRAL_MAX: f64 = 60.0;
 
-/// mean_reversion_v1：MA 長週期（趨勢過濾 + 出場停損線）
-pub const MR_MA_LONG: usize = 50;
-
 /// mean_reversion_v1：MA50 容忍跌幅（允許跌破 MA50 但不超過此比例）
-pub const MR_MA50_TOLERANCE: f64 = 0.90; // 允許跌到 MA50 的 90%
+/// 允許跌到 MA50 的 90%
+pub const MR_MA50_TOLERANCE: f64 = 0.90;
 
 // ── 版本 ──────────────────────────────────────────────────────────────────────
 

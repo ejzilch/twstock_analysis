@@ -8,6 +8,7 @@ import { ErrorToast, Card, LoadingSpinner } from '@/src/components/ui'
 export default function BacktestPage() {
     const router = useRouter()
     const backtest = useBacktest()
+    console.log(backtest);
 
     return (
         <div className="flex flex-col h-full">
