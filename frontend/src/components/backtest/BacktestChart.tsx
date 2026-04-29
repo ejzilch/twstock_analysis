@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { apiClient, buildQueryString } from '@/src/lib/api-client'
 import { CandleChart } from '@/src/components/charts/CandleChart'
 import { Card, LoadingSpinner, ErrorToast, Button } from '@/src/components/ui'
-import type { CandleItem, SignalItem, CandlesResponse } from '@/src/types/api.types'
+import type { CandleItem, SignalItem, CandlesResponse, TradeRecord } from '@/src/types/api.types'
 import { IndicatorToggle } from '@/src/components/charts/IndicatorToggle'
 
 interface BacktestChartProps {
@@ -12,102 +12,42 @@ interface BacktestChartProps {
     from_ms: number
     to_ms: number
     exitFilterPct?: number
+    trades: TradeRecord[]
 }
 
-function shouldHoldPosition(strategyName: string, candles: CandleItem[], idx: number): boolean {
-    const close = candles[idx]?.close ?? 0
-    const prev = candles[idx - 1]?.close ?? 0
-    if (close <= 0 || prev <= 0) return false
-
-    switch (strategyName) {
-        case 'trend_follow_v1': {
-            if (idx < 20) return false
-            const ma5 = candles.slice(idx - 5, idx).reduce((s, c) => s + c.close, 0) / 5
-            const ma20 = candles.slice(idx - 20, idx).reduce((s, c) => s + c.close, 0) / 20
-            return ma5 > ma20
-        }
-        case 'mean_reversion_v1':
-            return close < prev * 0.99
-        case 'breakout_v1': {
-            const start = Math.max(0, idx - 5)
-            const recentMax = candles
-                .slice(start, idx)
-                .reduce((maxClose, candle) => Math.max(maxClose, candle.close), Number.NEGATIVE_INFINITY)
-            return close > recentMax
-        }
-        default:
-            return close > prev
-    }
-}
-
-function buildBacktestTradeSignals(candles: CandleItem[], strategyName: string, exitFilterThreshold: number): SignalItem[] {
-    if (candles.length < 2) return []
-
-    let inPosition = false
-    const markers: SignalItem[] = []
-
-    for (let idx = 1; idx < candles.length - 1; idx += 1) {
-        const execCandle = candles[idx + 1]
-        const hold = shouldHoldPosition(strategyName, candles, idx)
-        const close = candles[idx].close
-        const prev = candles[idx - 1].close
-        const dropRatio = prev > 0 ? (prev - close) / prev : 0
-        const shouldExit = !hold && dropRatio >= exitFilterThreshold
-
-        if (hold && !inPosition) {
-            inPosition = true
-            markers.push({
-                id: `bt-buy-${execCandle.timestamp_ms}-${idx}`,
-                timestamp_ms: execCandle.timestamp_ms,
-                signal_type: 'BUY',
-                confidence: 1,
-                entry_price: execCandle.close,
-                target_price: execCandle.close,
-                stop_loss: execCandle.close,
-                reason: `backtest:${strategyName}:entry`,
-                source: 'technical_only',
-                reliability: 'high',
-                fallback_reason: null,
-            })
-        } else if (shouldExit && inPosition) {
-            inPosition = false
-            markers.push({
-                id: `bt-sell-${execCandle.timestamp_ms}-${idx}`,
-                timestamp_ms: execCandle.timestamp_ms,
-                signal_type: 'SELL',
-                confidence: 1,
-                entry_price: execCandle.close,
-                target_price: execCandle.close,
-                stop_loss: execCandle.close,
-                reason: `backtest:${strategyName}:exit`,
-                source: 'technical_only',
-                reliability: 'high',
-                fallback_reason: null,
-            })
-        }
-    }
-
-    if (inPosition) {
-        const last = candles[candles.length - 1]
-        markers.push({
-            id: `bt-sell-final-${last.timestamp_ms}`,
-            timestamp_ms: last.timestamp_ms,
-            signal_type: 'SELL',
+// 把 trades 轉成 SignalItem
+function tradesToSignals(trades: TradeRecord[]): SignalItem[] {
+    return trades.flatMap((trade) => [
+        {
+            id: `bt-buy-${trade.entry_timestamp_ms}`,
+            timestamp_ms: trade.entry_timestamp_ms,
+            signal_type: 'BUY' as const,
             confidence: 1,
-            entry_price: last.close,
-            target_price: last.close,
-            stop_loss: last.close,
-            reason: `backtest:${strategyName}:force-exit`,
-            source: 'technical_only',
-            reliability: 'high',
+            entry_price: trade.entry_price,
+            target_price: trade.entry_price,
+            stop_loss: trade.entry_price,
+            reason: 'backtest:entry',
+            source: 'technical_only' as const,
+            reliability: 'high' as const,
             fallback_reason: null,
-        })
-    }
-
-    return markers
+        },
+        {
+            id: `bt-sell-${trade.exit_timestamp_ms}`,
+            timestamp_ms: trade.exit_timestamp_ms,
+            signal_type: 'SELL' as const,
+            confidence: 1,
+            entry_price: trade.exit_price,
+            target_price: trade.exit_price,
+            stop_loss: trade.exit_price,
+            reason: 'backtest:exit',
+            source: 'technical_only' as const,
+            reliability: trade.is_win ? 'high' as const : 'low' as const,
+            fallback_reason: null,
+        },
+    ])
 }
 
-export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilterPct = 1.5 }: BacktestChartProps) {
+export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilterPct = 1.5, trades, }: BacktestChartProps) {
     const [candles, setCandles] = useState<CandleItem[]>([])
     const [signals, setSignals] = useState<SignalItem[]>([])
     const [loading, setLoading] = useState(true)
@@ -125,19 +65,20 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
         setHasMore(false)
         setLoading(true)
         setError(null)
+        setSignals(tradesToSignals(trades))
 
         apiClient<CandlesResponse>(
             `/api/v1/candles/${symbol}${buildQueryString({ from_ms, to_ms, interval: '1d', indicators: 'ma5,ma20,ma50,bollinger', })}`
         )
             .then((candlesRes) => {
                 setCandles(candlesRes.candles)
-                setSignals(buildBacktestTradeSignals(candlesRes.candles, strategyName, exitFilterPct / 100))
+                setSignals(tradesToSignals(trades))
                 setHasMore(candlesRes.next_cursor != null)
                 setCursor(candlesRes.next_cursor ?? null)
             })
             .catch(setError)
             .finally(() => setLoading(false))
-    }, [symbol, strategyName, from_ms, to_ms])
+    }, [symbol, strategyName, from_ms, to_ms, trades])
 
     // Load next page via cursor pagination
     async function loadMore() {
@@ -149,7 +90,6 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
             )
             setCandles((prev) => {
                 const merged = [...prev, ...res.candles]
-                setSignals(buildBacktestTradeSignals(merged, strategyName, exitFilterPct / 100))
                 return merged
             })
             setHasMore(res.next_cursor != null)

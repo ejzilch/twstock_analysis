@@ -107,32 +107,40 @@ pub const TF_MA_SHORT: usize = 5;
 pub const TF_MA_MID: usize = 20;
 pub const TF_MA_LONG: usize = 50;
 
-/// trend_follow_v1：RSI 計算週期
-pub const TF_RSI_PERIOD: usize = 14;
+/// RSI 計算週期 (共用)
+pub const RSI_PERIOD: usize = 14;
+
+/// Bollinger Bands 計算週期
+pub const BOLL_PERIOD: usize = 20;
+
+/// Bollinger Bands 標準差倍數
+pub const BOLL_STD_MULTIPLIER: f64 = 2.0;
 
 /// trend_follow_v1：RSI 過熱門檻，超過此值且轉弱才出場
 pub const TF_RSI_OVERBOUGHT: f64 = 75.0;
 
+/// breakout_v1：RSI 過熱門檻，高於此值不追高進場
+pub const BO_RSI_OVERBOUGHT: f64 = 80.0;
+
+/// breakout_v1：MACD 計算參數
+pub const BO_MACD_FAST: usize = 12;
+pub const BO_MACD_SLOW: usize = 26;
+pub const BO_MACD_SIGNAL: usize = 9;
+
 /// trend_follow_v1：弱勢進場的倉位比例（相對於 position_size_percent）
 pub const TF_WEAK_SIGNAL_POSITION_RATIO: f64 = 0.5;
 
-/// mean_reversion_v1：RSI 計算週期
-pub const MR_RSI_PERIOD: usize = 14;
-
 /// mean_reversion_v1：RSI 超賣門檻，低於此值才進場
-pub const MR_RSI_OVERSOLD: f64 = 35.0;
+pub const MR_RSI_OVERSOLD: f64 = 45.0;
 
 /// mean_reversion_v1：RSI 中性區上限，高於此值不做均值回歸
 pub const MR_RSI_NEUTRAL_MAX: f64 = 60.0;
 
-/// mean_reversion_v1：Bollinger Bands 計算週期
-pub const MR_BOLL_PERIOD: usize = 20;
-
-/// mean_reversion_v1：Bollinger Bands 標準差倍數
-pub const MR_BOLL_STD_MULTIPLIER: f64 = 2.0;
-
 /// mean_reversion_v1：MA 長週期（趨勢過濾 + 出場停損線）
 pub const MR_MA_LONG: usize = 50;
+
+/// mean_reversion_v1：MA50 容忍跌幅（允許跌破 MA50 但不超過此比例）
+pub const MR_MA50_TOLERANCE: f64 = 0.90; // 允許跌到 MA50 的 90%
 
 // ── 版本 ──────────────────────────────────────────────────────────────────────
 
