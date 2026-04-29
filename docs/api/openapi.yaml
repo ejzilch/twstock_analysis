@@ -867,6 +867,10 @@ components:
         - max_drawdown
         - sharpe_ratio
         - annual_return
+        - max_consecutive_losses
+        - max_consecutive_loss_amount
+        - avg_consecutive_losses
+        - max_consecutive_wins
       properties:
         total_trades:
           type: integer
@@ -893,6 +897,26 @@ components:
         annual_return:
           type: number
           format: double
+        max_consecutive_losses:
+          type: integer
+          format: int32
+          minimum: 0
+          description: 回測期間最長連續虧損筆數
+        max_consecutive_loss_amount:
+          type: number
+          format: double
+          minimum: 0.0
+          description: 最長連虧區間累計虧損金額（TWD 絕對值）
+        avg_consecutive_losses:
+          type: number
+          format: double
+          minimum: 0.0
+          description: 所有連虧區間的平均筆數，無連虧時為 0.0
+        max_consecutive_wins:
+          type: integer
+          format: int32
+          minimum: 0
+          description: 回測期間最長連續獲利筆數
 
     # ── Error ─────────────────────────────────────────────────────────────────
 
