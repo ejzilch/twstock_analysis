@@ -33,16 +33,11 @@ export function BacktestResult({ result }: BacktestResultProps) {
                 </div>
             </div>
 
-            < div className="grid grid-cols-2 gap-3 mb-3" >
+            < div className="grid grid-cols-3 gap-3 mb-3" >
                 <MetricCard
                     label="年化報酬"
                     value={formatPercent(metrics.annual_return)}
                     positive={metrics.annual_return >= 0}
-                />
-                <MetricCard
-                    label="夏普比率"
-                    value={metrics.sharpe_ratio.toFixed(2)}
-                    positive={metrics.sharpe_ratio >= 1}
                 />
                 <MetricCard
                     label="最大回撤"
@@ -51,14 +46,15 @@ export function BacktestResult({ result }: BacktestResultProps) {
                     positive={false}
                 />
                 <MetricCard
+                    label="夏普比率"
+                    value={metrics.sharpe_ratio.toFixed(2)}
+                    positive={metrics.sharpe_ratio >= 1}
+                />
+                <MetricCard
                     label="獲利因子"
                     value={metrics.profit_factor.toFixed(2)}
                     positive={metrics.profit_factor >= 1.5}
                 />
-            </div>
-
-            < div className="grid grid-cols-3 gap-3" >
-                <MetricCard label="總交易次數" value={String(metrics.total_trades)} />
                 <MetricCard
                     label="勝率"
                     value={formatPercent(metrics.win_rate)}
@@ -69,6 +65,36 @@ export function BacktestResult({ result }: BacktestResultProps) {
                     value={`${metrics.winning_trades}W / ${metrics.losing_trades}L`}
                 />
             </div>
-        </Card>
+
+            < div className="grid grid-cols-3 gap-3" >
+
+
+            </div>
+
+            <div className="grid grid-cols-4 gap-3 mt-3">
+                <MetricCard label="總交易次數" value={String(metrics.total_trades)} />
+                <MetricCard
+                    label="最長連虧筆數"
+                    value={`${metrics.max_consecutive_losses} 筆`}
+                    positive={false}
+                />
+                <MetricCard
+                    label="最長連勝筆數"
+                    value={`${metrics.max_consecutive_wins} 筆`}
+                    positive={true}
+                />
+                <MetricCard
+                    label="平均連虧筆數"
+                    value={`${(metrics.avg_consecutive_losses ?? 0).toFixed(1)} 筆`}
+                />
+            </div>
+            <div className="grid grid-cols-3 gap-3 mt-3">
+                <MetricCard
+                    label="連虧最大損失"
+                    value={formatCapital(metrics.max_consecutive_loss_amount)}
+                    positive={false}
+                />
+            </div>
+        </Card >
     )
 }
