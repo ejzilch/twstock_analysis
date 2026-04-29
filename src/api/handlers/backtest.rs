@@ -1,5 +1,11 @@
 use crate::api::middleware::ApiError;
 use crate::app_state::AppState;
+use crate::constants::{
+    BANDWIDTH_HIGH_PERCENTILE, BANDWIDTH_LOOKBACK, BANDWIDTH_LOW_PERCENTILE,
+    DEFAULT_AVG_CONSECUTIVE_LOSSES, TF_MA_LONG, TF_MA_MID, TF_MA_SHORT, TF_RSI_OVERBOUGHT,
+    TF_RSI_PERIOD, TF_WEAK_SIGNAL_POSITION_RATIO,
+};
+use crate::core::indicators::{ma::compute_sma, rsi::compute_rsi};
 use axum::{extract::State, Json};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -41,6 +47,14 @@ pub struct BacktestMetrics {
     pub max_drawdown: f64,
     pub sharpe_ratio: f64,
     pub annual_return: f64,
+    /// 回測期間最長連續虧損筆數
+    pub max_consecutive_losses: u32,
+    /// 最長連虧區間的累計虧損金額（TWD，絕對值）
+    pub max_consecutive_loss_amount: f64,
+    /// 所有連虧區間的平均筆數（無連虧時為 0.0）
+    pub avg_consecutive_losses: f64,
+    /// 回測期間最長連續獲利筆數
+    pub max_consecutive_wins: u32,
 }
 
 /// POST /api/v1/backtest 的完整回應
@@ -61,6 +75,18 @@ pub struct BacktestResponse {
 struct CandleRow {
     timestamp_ms: i64,
     close: f64,
+}
+
+/// trend_follow_v1 進場強度
+/// 影響實際使用的倉位比例
+#[derive(Debug, PartialEq)]
+enum TrendSignalStrength {
+    /// MA5 > MA20 > MA50，強勢排列，全倉進場
+    Strong,
+    /// MA20 > MA50 且 MA5 剛上穿 MA20，弱勢補訊號，半倉進場
+    Weak,
+    /// 不進場
+    None,
 }
 
 // 台股交易成本
@@ -171,22 +197,53 @@ pub async fn backtest_handler(
     //   2. 消除 net_pnl_ratio 重複扣費（equity 增減即為精確現金流，不再另外算）
     //   3. 硬停損可直接比對 entry_price（-HARD_STOP_LOSS_PCT 觸發強制出場）
     // ────────────────────────────────────────────────────────────────────────
-    let mut equity = request.initial_capital;
-    let mut equity_curve = vec![equity];
-    let mut strategy_daily_returns = Vec::with_capacity(candles.len().saturating_sub(2));
+    let mut equity: f64 = request.initial_capital;
+    let mut equity_curve: Vec<f64> = vec![equity];
+    let mut strategy_daily_returns: Vec<f64> = Vec::with_capacity(candles.len().saturating_sub(2));
 
-    let mut in_position = false;
-    let mut entry_price = 0.0f64;
-    let mut position_units = 0.0f64; // 買入的股數（單位數）
-    let mut position_cost = 0.0f64; // 進場時的名目成本（entry_price × units）
-    let mut holding_days = 0u32;
-    let mut winning_trades = 0i32;
-    let mut losing_trades = 0i32;
-    let mut gross_profit = 0.0f64;
-    let mut gross_loss = 0.0f64;
+    let mut in_position: bool = false;
+    let mut entry_price: f64 = 0.0;
+    let mut position_units: f64 = 0.0; // 買入的股數（單位數）
+    let mut position_cost: f64 = 0.0; // 進場時的名目成本（entry_price × units）
+    let mut holding_days: u32 = 0;
+    let mut winning_trades: i32 = 0;
+    let mut consecutive_losses: u32 = 0;
+    let mut max_consecutive_losses: u32 = 0;
+    let mut max_consecutive_loss_amount: f64 = 0.0;
+    let mut current_loss_streak_amount: f64 = 0.0;
+    let mut consecutive_wins: u32 = 0;
+    let mut max_consecutive_wins: u32 = 0;
+    let mut loss_streaks: Vec<u32> = Vec::new();
+    let mut losing_trades: i32 = 0;
+    let mut gross_profit: f64 = 0.0;
+    let mut gross_loss: f64 = 0.0;
+
+    // ── 回測開始前，預算指標序列 ──────────────────────────────────────────
+    let closes: Vec<f64> = candles.iter().map(|c| c.close).collect();
+
+    // ── 回測開始前，預算整個 K 線序列的帶寬 ──
+    let bandwidth_series = compute_bandwidth_series(&candles);
+
+    // MA 序列（trend_follow_v1 用）
+    let ma5_series = compute_sma(&closes, TF_MA_SHORT); // 現有函數直接復用
+    let ma20_series = compute_sma(&closes, TF_MA_MID);
+    let ma50_series = compute_sma(&closes, TF_MA_LONG);
+
+    // RSI 序列（trend_follow_v1 出場用）
+    let rsi_series = compute_rsi(&closes, TF_RSI_PERIOD); // 現有函數直接復用
 
     // 訊號在第 i 日收盤確認，第 i+1 日收盤成交（Look-ahead Bias 已修正）
     for i in 1..candles.len().saturating_sub(1) {
+        // Layer 0：市場環境過濾
+        if !is_market_tradeable(&bandwidth_series, i) {
+            // 若持倉中，繼續更新每日報酬但不做新的進出場判斷
+            if in_position {
+                holding_days += 1;
+                // 每日報酬更新維持現有邏輯
+            }
+            continue; // 跳過進出場判斷
+        }
+
         let exec_close = candles[i + 1].close;
         let prev_exec_close = candles[i].close;
 
@@ -194,7 +251,44 @@ pub async fn backtest_handler(
             continue;
         }
 
-        let should_hold = should_hold_position(&request.strategy_name, &candles, i);
+        // ── 依策略取得進出場訊號 ────────────────────────────────────────────
+        let (should_hold, actual_position_fraction) = match request.strategy_name.as_str() {
+            "trend_follow_v1" => {
+                // L1 趨勢過濾：收盤需在 MA50 之上
+                let ma50 = ma50_series[i];
+                let close = candles[i].close;
+                if !ma50.is_finite() || close <= ma50 {
+                    (false, 0.0)
+                } else {
+                    // L2 進場強度
+                    let strength =
+                        trend_follow_signal_strength(&ma5_series, &ma20_series, &ma50_series, i);
+                    let fraction = match strength {
+                        TrendSignalStrength::Strong => position_fraction,
+                        TrendSignalStrength::Weak => {
+                            position_fraction * TF_WEAK_SIGNAL_POSITION_RATIO
+                        }
+                        TrendSignalStrength::None => 0.0,
+                    };
+                    (strength != TrendSignalStrength::None, fraction)
+                }
+            }
+
+            // 其他策略維持現有邏輯，fraction 固定用 position_fraction
+            _ => {
+                let hold = should_hold_position(&request.strategy_name, &candles, i);
+                (hold, position_fraction)
+            }
+        };
+
+        // ── 出場判斷 ────────────────────────────────────────────────────────
+        // trend_follow_v1 用新的出場邏輯，其他策略維持現有
+        let strategy_wants_exit = match request.strategy_name.as_str() {
+            "trend_follow_v1" => {
+                trend_follow_should_exit(&ma5_series, &ma20_series, &rsi_series, i)
+            }
+            _ => !should_hold,
+        };
 
         // ── 出場緩衝濾網 ────────────────────────────────────────────────────────
         // signal_close = candles[i].close（訊號日收盤）
@@ -217,16 +311,20 @@ pub async fn backtest_handler(
 
         // ── 出場條件：(訊號轉空 AND 跌幅達閾值 AND 滿最短持倉) OR 硬停損 ──────
         let can_exit = holding_days >= min_holding_days;
-        let signal_exit = !should_hold && drop_ratio >= exit_filter_threshold && can_exit;
+
+        // 現有的出場條件組合（exit_filter、min_holding_days、hard_stop）維持不變
+        // 只是把 !should_hold 換成 strategy_wants_exit
+        let signal_exit = strategy_wants_exit && drop_ratio >= exit_filter_threshold && can_exit;
         let should_exit = (signal_exit || hard_stop_triggered) && in_position;
 
+        // ── 進場：用 actual_position_fraction 取代固定的 position_fraction ──
         if should_hold && !in_position {
             // ── 進場：計算買入單位數，扣除買進手續費 ────────────────────────────
             // capital_deployed = 當下可用資金 × 部位比例
             // buy_fee          = capital_deployed × COMMISSION_RATE（買進手續費）
             // units            = capital_deployed / exec_close（實際可買的股數）
             // equity 扣除 buy_fee 後剩餘閒置資金部分不動
-            let capital_deployed = equity * position_fraction;
+            let capital_deployed = equity * actual_position_fraction; // 強弱倉位分層
             let buy_fee = capital_deployed * COMMISSION_RATE;
             position_units = capital_deployed / exec_close;
             position_cost = capital_deployed; // 名目成本（不含手續費）
@@ -258,9 +356,34 @@ pub async fn backtest_handler(
             if net_pnl >= 0.0 {
                 winning_trades += 1;
                 gross_profit += net_pnl / position_cost;
+
+                // 連勝計數
+                consecutive_wins += 1;
+                if consecutive_wins > max_consecutive_wins {
+                    max_consecutive_wins = consecutive_wins;
+                }
+                // 結束連虧區間，記錄後重置
+                if consecutive_losses > 0 {
+                    loss_streaks.push(consecutive_losses);
+                }
+
+                consecutive_losses = 0;
+                current_loss_streak_amount = 0.0;
             } else {
                 losing_trades += 1;
                 gross_loss += net_pnl.abs() / position_cost;
+
+                // 連虧計數
+                consecutive_wins = 0;
+                consecutive_losses += 1;
+
+                current_loss_streak_amount =
+                    (current_loss_streak_amount + net_pnl.abs()).min(f64::MAX); // f64 + f64 溢位只會到 inf，min 可以夾住
+
+                if consecutive_losses > max_consecutive_losses {
+                    max_consecutive_losses = consecutive_losses;
+                    max_consecutive_loss_amount = current_loss_streak_amount;
+                }
             }
 
             in_position = false;
@@ -304,11 +427,46 @@ pub async fn backtest_handler(
         if net_pnl >= 0.0 {
             winning_trades += 1;
             gross_profit += net_pnl / position_cost;
+
+            // 連勝計數
+            consecutive_wins += 1;
+            if consecutive_wins > max_consecutive_wins {
+                max_consecutive_wins = consecutive_wins;
+            }
+            // 結束連虧區間，記錄後重置
+            if consecutive_losses > 0 {
+                loss_streaks.push(consecutive_losses);
+            }
+            consecutive_losses = 0;
+            // current_loss_streak_amount = 0.0;
         } else {
             losing_trades += 1;
             gross_loss += net_pnl.abs() / position_cost;
+
+            // 連虧計數
+            // consecutive_wins = 0;
+            consecutive_losses += 1;
+            // f64 + f64 溢位只會到 inf，min 可以夾住
+            current_loss_streak_amount = (current_loss_streak_amount + net_pnl.abs()).min(f64::MAX);
+
+            if consecutive_losses > max_consecutive_losses {
+                max_consecutive_losses = consecutive_losses;
+                max_consecutive_loss_amount = current_loss_streak_amount;
+            }
         }
     }
+
+    // 末日平倉結束後，收尾連虧區間
+    if consecutive_losses > 0 {
+        loss_streaks.push(consecutive_losses);
+    }
+
+    // 計算平均
+    let avg_consecutive_losses: f64 = if loss_streaks.is_empty() {
+        DEFAULT_AVG_CONSECUTIVE_LOSSES
+    } else {
+        loss_streaks.iter().sum::<u32>() as f64 / loss_streaks.len() as f64
+    };
 
     let total_trades = winning_trades + losing_trades;
     let win_rate = if total_trades > 0 {
@@ -354,6 +512,10 @@ pub async fn backtest_handler(
             max_drawdown,
             sharpe_ratio,
             annual_return,
+            max_consecutive_losses,
+            max_consecutive_loss_amount,
+            avg_consecutive_losses,
+            max_consecutive_wins,
         },
         created_at_ms: Utc::now().timestamp_millis(),
     }))
@@ -406,6 +568,84 @@ fn should_hold_position(strategy_name: &str, candles: &[CandleRow], idx: usize) 
             close > prev
         }
     }
+}
+
+/// trend_follow_v1 專用：判斷進場強度
+/// Strong  = MA5 > MA20 > MA50（三均線順勢排列）
+/// Weak    = MA20 > MA50 且 MA5 剛上穿 MA20（補訊號）
+/// None    = 不進場
+fn trend_follow_signal_strength(
+    ma5_series: &[f64],
+    ma20_series: &[f64],
+    ma50_series: &[f64],
+    idx: usize,
+) -> TrendSignalStrength {
+    // 資料不足時不進場
+    if idx < TF_MA_LONG {
+        return TrendSignalStrength::None;
+    }
+
+    let ma5 = ma5_series[idx];
+    let ma20 = ma20_series[idx];
+    let ma50 = ma50_series[idx];
+    let ma5_prev = ma5_series[idx - 1];
+    let ma20_prev = ma20_series[idx - 1];
+
+    // 任一指標無效時不進場
+    if !ma5.is_finite() || !ma20.is_finite() || !ma50.is_finite() {
+        return TrendSignalStrength::None;
+    }
+
+    // 強勢：三均線順勢排列
+    if ma5 > ma20 && ma20 > ma50 {
+        return TrendSignalStrength::Strong;
+    }
+
+    // 弱勢：MA20 > MA50 且 MA5 剛上穿 MA20
+    // 「剛上穿」= 今日 MA5 > MA20 且昨日 MA5 <= MA20
+    let just_crossed = ma5 > ma20 && ma5_prev <= ma20_prev;
+    if ma20 > ma50 && just_crossed {
+        return TrendSignalStrength::Weak;
+    }
+
+    TrendSignalStrength::None
+}
+
+/// trend_follow_v1 專用：判斷是否應該出場
+/// MA5 < MA20（動能轉弱）OR（RSI > 門檻 且 RSI 轉弱）
+fn trend_follow_should_exit(
+    ma5_series: &[f64],
+    ma20_series: &[f64],
+    rsi_series: &[f64],
+    idx: usize,
+) -> bool {
+    if idx < 1 {
+        return false;
+    }
+
+    let ma5 = ma5_series[idx];
+    let ma20 = ma20_series[idx];
+    let rsi = rsi_series[idx];
+    let rsi_prev = rsi_series[idx - 1];
+
+    if !ma5.is_finite() || !ma20.is_finite() {
+        return false;
+    }
+
+    // 條件一：MA5 跌破 MA20，短期動能轉弱
+    if ma5 < ma20 {
+        return true;
+    }
+
+    // 條件二：RSI 過熱後轉弱
+    // 「轉弱」= 今日 RSI < 前日 RSI
+    if rsi.is_finite() && rsi_prev.is_finite() {
+        if rsi > TF_RSI_OVERBOUGHT && rsi < rsi_prev {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn compute_max_drawdown(equity_curve: &[f64]) -> f64 {
@@ -468,6 +708,82 @@ fn compute_annualized_return(initial: f64, final_capital: f64, trading_days: usi
     } else {
         (final_capital / initial).powf(1.0 / years) - 1.0
     }
+}
+
+/// 預算每根 K 線對應的 Bollinger 帶寬值
+/// 帶寬定義：(upper - lower) / middle，跨股票可比較
+/// 資料不足 period 根時回傳 None
+fn compute_bandwidth_series(candles: &[CandleRow]) -> Vec<Option<f64>> {
+    let period = 20usize;
+    let std_multiplier = 2.0f64;
+    let closes: Vec<f64> = candles.iter().map(|c| c.close).collect();
+    let n = closes.len();
+    let mut result = vec![None; n];
+
+    for i in period - 1..n {
+        let window = &closes[i + 1 - period..=i];
+        let mean = window.iter().sum::<f64>() / period as f64;
+        if mean <= 0.0 {
+            continue;
+        }
+        let variance = window.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / period as f64;
+        let std_dev = variance.sqrt();
+        let upper = mean + std_multiplier * std_dev;
+        let lower = mean - std_multiplier * std_dev;
+        let bandwidth = (upper - lower) / mean;
+        if bandwidth.is_finite() {
+            result[i] = Some(bandwidth);
+        }
+    }
+    result
+}
+
+/// 計算某根 K 線位置的帶寬 percentile 閾值
+/// 取 idx 之前 BANDWIDTH_LOOKBACK 根有效帶寬值排序後取 percentile
+fn compute_bandwidth_percentiles(
+    bandwidth_series: &[Option<f64>],
+    idx: usize,
+) -> Option<(f64, f64)> {
+    let lookback = BANDWIDTH_LOOKBACK;
+    let start = if idx >= lookback { idx - lookback } else { 0 };
+
+    let mut history: Vec<f64> = bandwidth_series[start..idx]
+        .iter()
+        .filter_map(|v| *v)
+        .collect();
+
+    if history.len() < lookback / 2 {
+        // 歷史資料不足一半，不過濾（寬鬆處理回測起始點）
+        return None;
+    }
+
+    history.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let len = history.len();
+
+    let low_idx = ((len as f64) * BANDWIDTH_LOW_PERCENTILE) as usize;
+    let high_idx = ((len as f64) * BANDWIDTH_HIGH_PERCENTILE) as usize;
+    let low_threshold = history[low_idx.min(len - 1)];
+    let high_threshold = history[high_idx.min(len - 1)];
+
+    Some((low_threshold, high_threshold))
+}
+
+/// Layer 0：判斷當前市場環境是否值得交易
+/// 帶寬過低（橫盤）或過高（恐慌）時回傳 false
+fn is_market_tradeable(bandwidth_series: &[Option<f64>], idx: usize) -> bool {
+    let current_bandwidth = match bandwidth_series[idx] {
+        Some(bw) => bw,
+        None => return true, // 帶寬無法計算時，不過濾（讓策略自己判斷）
+    };
+
+    let (low_threshold, high_threshold) = match compute_bandwidth_percentiles(bandwidth_series, idx)
+    {
+        Some(thresholds) => thresholds,
+        None => return true, // 歷史資料不足時，不過濾
+    };
+
+    // 帶寬在正常範圍內才交易
+    current_bandwidth > low_threshold && current_bandwidth < high_threshold
 }
 
 #[cfg(test)]

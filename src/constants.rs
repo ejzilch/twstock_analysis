@@ -88,6 +88,52 @@ pub const RATE_LIMIT_MAX_REQUESTS_PER_MINUTE: u32 = 60;
 /// Rate Limit 滑動視窗大小（秒）
 pub const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 
+// ── strategy 設定 ─────────────────────────────────────────────────────────────
+
+/// 連續虧損統計：損益序列為空時的預設平均值
+pub const DEFAULT_AVG_CONSECUTIVE_LOSSES: f64 = 0.0;
+
+/// Layer 0 市場環境過濾：帶寬低於此 percentile 視為橫盤，完全不交易
+pub const BANDWIDTH_LOW_PERCENTILE: f64 = 0.30; // 30th percentile
+
+/// Layer 0 市場環境過濾：帶寬高於此 percentile 視為恐慌行情，完全不交易
+pub const BANDWIDTH_HIGH_PERCENTILE: f64 = 0.95; // 95th percentile
+
+/// Layer 0 帶寬 percentile 計算所需的最小歷史根數
+pub const BANDWIDTH_LOOKBACK: usize = 20;
+
+/// trend_follow_v1：MA 計算週期
+pub const TF_MA_SHORT: usize = 5;
+pub const TF_MA_MID: usize = 20;
+pub const TF_MA_LONG: usize = 50;
+
+/// trend_follow_v1：RSI 計算週期
+pub const TF_RSI_PERIOD: usize = 14;
+
+/// trend_follow_v1：RSI 過熱門檻，超過此值且轉弱才出場
+pub const TF_RSI_OVERBOUGHT: f64 = 75.0;
+
+/// trend_follow_v1：弱勢進場的倉位比例（相對於 position_size_percent）
+pub const TF_WEAK_SIGNAL_POSITION_RATIO: f64 = 0.5;
+
+/// mean_reversion_v1：RSI 計算週期
+pub const MR_RSI_PERIOD: usize = 14;
+
+/// mean_reversion_v1：RSI 超賣門檻，低於此值才進場
+pub const MR_RSI_OVERSOLD: f64 = 35.0;
+
+/// mean_reversion_v1：RSI 中性區上限，高於此值不做均值回歸
+pub const MR_RSI_NEUTRAL_MAX: f64 = 60.0;
+
+/// mean_reversion_v1：Bollinger Bands 計算週期
+pub const MR_BOLL_PERIOD: usize = 20;
+
+/// mean_reversion_v1：Bollinger Bands 標準差倍數
+pub const MR_BOLL_STD_MULTIPLIER: f64 = 2.0;
+
+/// mean_reversion_v1：MA 長週期（趨勢過濾 + 出場停損線）
+pub const MR_MA_LONG: usize = 50;
+
 // ── 版本 ──────────────────────────────────────────────────────────────────────
 
 /// API 版本號，對應 openapi.yaml 的 version 欄位
