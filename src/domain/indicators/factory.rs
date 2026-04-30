@@ -1,4 +1,4 @@
-use crate::core::indicators::{
+use crate::domain::indicators::{
     bollinger::BollingerBands, ma::MovingAverage, macd::Macd, rsi::Rsi, traits::IndicatorCalculator,
 };
 use crate::models::{

@@ -4,7 +4,7 @@ use crate::api::models::request::CandlesQueryParams;
 use crate::api::models::response::{CandleResponse, CandlesApiResponse};
 use crate::app_state::AppState;
 use crate::constants::CANDLES_MAX_PER_REQUEST;
-use crate::core::indicators::factory::IndicatorFactory;
+use crate::domain::indicators::factory::IndicatorFactory;
 use crate::models::indicators::{BollingerConfig, IndicatorConfig};
 use crate::models::{Candle, IndicatorValue, Interval};
 use axum::{

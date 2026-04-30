@@ -1,10 +1,8 @@
-/// src/data/implementations.rs
-///
 /// trait 的生產環境實作。
 /// 測試時不使用本模組，改用 mocks.rs。
-use crate::core::BridgeError;
 use crate::data::models::RawCandle;
 use crate::data::traits::{CacheInvalidator, DbWriter};
+use crate::domain::BridgeError;
 
 use async_trait::async_trait;
 use redis::aio::MultiplexedConnection;

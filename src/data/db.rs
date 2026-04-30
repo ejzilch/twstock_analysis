@@ -10,9 +10,9 @@
 ///   2. COMMIT 事務
 ///   3. 統一 UNLINK affected symbols 的 redis keys（CacheInvalidator::invalidate）
 use crate::constants::{BULK_INSERT_MAX_BATCH_SIZE, BULK_INSERT_MAX_WAIT_MS};
-use crate::core::BridgeError;
 use crate::data::models::RawCandle;
 use crate::data::traits::{CacheInvalidator, DbWriter};
+use crate::domain::BridgeError;
 use sqlx::PgPool;
 use tracing::error;
 
@@ -63,7 +63,7 @@ impl BulkInsertBuffer {
         writer: &dyn DbWriter,
         invalidator: &mut dyn CacheInvalidator,
     ) -> Result<(), BridgeError> {
-        if self.buffer.is_empty() {
+        if self.is_empty() {
             return Ok(());
         }
 
@@ -85,7 +85,7 @@ impl BulkInsertBuffer {
         self.total_skipped += (batch.len() - written) as i32;
 
         // Step 3：快取失效（COMMIT 之後才執行）
-        invalidator.invalidate(&affected_symbols);
+        let _ = invalidator.invalidate(&affected_symbols);
 
         self.last_flush_at = Instant::now();
 
@@ -106,7 +106,7 @@ impl BulkInsertBuffer {
         invalidator: &mut dyn CacheInvalidator,
     ) -> Result<(), BridgeError> {
         info!(
-            remaining_candles = self.buffer.len(),
+            remaining_candles = self.len(),
             "Flushing remaining candles before shutdown"
         );
         self.flush(writer, invalidator).await

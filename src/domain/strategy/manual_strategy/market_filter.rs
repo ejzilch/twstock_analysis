@@ -1,6 +1,8 @@
-use crate::constants::{BANDWIDTH_HIGH_PERCENTILE, BANDWIDTH_LOOKBACK, BANDWIDTH_LOW_PERCENTILE};
+use crate::domain::strategy::constants::{
+    BANDWIDTH_HIGH_PERCENTILE, BANDWIDTH_LOOKBACK, BANDWIDTH_LOW_PERCENTILE,
+};
 
-use super::types::CandleRow;
+use crate::models::candle::CandleRow;
 
 /// 預算每根 K 線對應的 Bollinger 帶寬值
 /// 帶寬定義：(upper - lower) / middle，跨股票可比較

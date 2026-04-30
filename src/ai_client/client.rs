@@ -1,5 +1,5 @@
 use crate::ai_client::serialization::{deserialize, serialize, SerializationFormat};
-use crate::core::BridgeError;
+use crate::domain::BridgeError;
 use anyhow::Context;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};

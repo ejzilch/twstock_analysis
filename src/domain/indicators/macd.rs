@@ -1,4 +1,4 @@
-use crate::core::indicators::traits::IndicatorCalculator;
+use crate::domain::indicators::traits::IndicatorCalculator;
 use crate::models::{candle::MacdValue, Candle, IndicatorValue};
 use std::collections::HashMap;
 

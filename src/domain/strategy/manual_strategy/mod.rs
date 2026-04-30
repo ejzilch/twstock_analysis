@@ -1,8 +1,9 @@
 pub mod breakout;
+pub mod market_filter;
 pub mod mean_reversion;
 pub mod trend_follow;
 
-use super::types::CandleRow;
+use crate::models::candle::CandleRow;
 
 // ── MA 常數（trend_follow legacy fallback 用） ────────────────────────────────
 const MA_SHORT_PERIOD: usize = 5;

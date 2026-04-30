@@ -7,8 +7,8 @@
 /// 本次新增：fetch_range()，供 manual_sync.rs 的缺口補齊使用。
 /// 現有函數（fetch_latest 等）不動，確保排程邏輯不受影響。
 use crate::constants::{FINMIND_API_BASE_URL, FINMIND_API_TIMEOUT_SECS, FINMIND_DATE_FORMAT};
-use crate::core::BridgeError;
 use crate::data::models::{current_timestamp_ms, RawCandle};
+use crate::domain::BridgeError;
 use crate::models::enums::{DataSource, Exchange, Interval};
 use std::collections::HashMap;
 

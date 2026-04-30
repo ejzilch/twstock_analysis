@@ -11,13 +11,13 @@
 ///   - 排程與手動同步共用 FinMindRateLimiter 實例
 use crate::api::handlers::sync_state::is_sync_cancel_requested;
 use crate::constants::{FINMIND_API_TOKEN_ENV, MANUAL_SYNC_BATCH_DAYS};
-use crate::core::BridgeError;
 use crate::data::db::{sync_log_update_counts, sync_log_update_status, BulkInsertBuffer};
 use crate::data::fetch::{fetch_range, fetch_stock_info_map};
 use crate::data::fetch_rate_limiter::{FinMindRateLimiter, SyncProgress};
 use crate::data::implementations::{PostgresDbWriter, RedisInvalidator};
 use crate::data::models::current_timestamp_ms;
 use crate::data::symbol_sync::{get_finmind_earliest_ms, upsert_symbols, SymbolSyncData};
+use crate::domain::BridgeError;
 use crate::models::enums::{DataSource, Exchange, Interval};
 use chrono::{Duration, NaiveDate, Utc};
 use redis::aio::MultiplexedConnection;
@@ -264,7 +264,6 @@ pub async fn fetch_and_insert_gap(
 
     let batches = gap.clone().into_monthly_batches();
     let total_batches = batches.len();
-    let mut total_inserted = 0i32;
     let mut total_failed = 0i32;
 
     // 紀錄這個缺口開始前，Buffer 內的狀態基準線

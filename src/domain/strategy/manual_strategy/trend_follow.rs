@@ -1,4 +1,6 @@
-use crate::constants::{TF_MA_LONG, TF_RSI_OVERBOUGHT, TF_WEAK_SIGNAL_POSITION_RATIO};
+use crate::domain::strategy::constants::{
+    TF_MA_LONG, TF_RSI_OVERBOUGHT, TF_WEAK_SIGNAL_POSITION_RATIO,
+};
 
 /// trend_follow_v1 進場強度，影響實際使用的倉位比例
 #[derive(Debug, PartialEq)]
