@@ -37,7 +37,7 @@ pub struct CandleRow {
 /// POST /api/v1/backtest 的請求結構，對應 API_CONTRACT.md
 #[derive(Debug, Deserialize)]
 pub struct BacktestRequest {
-    pub _request_id: String,
+    pub request_id: String,
     pub symbol: String,
     pub strategy_name: String,
     pub from_ms: i64,
