@@ -29,11 +29,11 @@ use crate::constants::{
     ERROR_SYNC_ALREADY_RUNNING, ERROR_SYNC_NOT_FOUND, FINMIND_RATE_LIMIT_BUFFER,
     FINMIND_RATE_LIMIT_PER_HOUR,
 };
-use crate::core::BridgeError;
 use crate::data::db::{sync_log_create, SyncLogEntry};
 use crate::data::fetch_rate_limiter::FinMindRateLimiter;
 use crate::data::manual_sync::{run_manual_sync, SyncScope};
 use crate::data::models::current_timestamp_ms;
+use crate::domain::BridgeError;
 
 // ── POST /api/v1/admin/sync ───────────────────────────────────────────────────
 

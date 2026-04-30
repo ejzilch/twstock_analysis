@@ -6,9 +6,9 @@
 ///   同步時一併寫入 finmind_earliest_ms，
 ///   供 manual_sync.rs detect_gaps() 計算歷史補齊的起點。
 use sqlx::PgPool;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
-use crate::core::BridgeError;
+use crate::domain::BridgeError;
 use crate::models::enums::{DataSource, Exchange};
 
 /// Symbol 同步資料（從 FinMind 取得）。

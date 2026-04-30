@@ -85,25 +85,6 @@ pub const RATE_LIMIT_MAX_REQUESTS_PER_MINUTE: u32 = 60;
 /// Rate Limit 滑動視窗大小（秒）
 pub const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 
-// ── strategy 設定 ─────────────────────────────────────────────────────────────
-
-/// 連續虧損統計：損益序列為空時的預設平均值
-pub const DEFAULT_AVG_CONSECUTIVE_LOSSES: f64 = 0.0;
-
-/// Layer 0 市場環境過濾：帶寬低於此 percentile 視為橫盤，完全不交易
-pub const BANDWIDTH_LOW_PERCENTILE: f64 = 0.30; // 30th percentile
-
-/// Layer 0 市場環境過濾：帶寬高於此 percentile 視為恐慌行情，完全不交易
-pub const BANDWIDTH_HIGH_PERCENTILE: f64 = 0.95; // 95th percentile
-
-/// Layer 0 帶寬 percentile 計算所需的最小歷史根數
-pub const BANDWIDTH_LOOKBACK: usize = 20;
-
-/// trend_follow_v1：MA 計算週期
-pub const TF_MA_SHORT: usize = 5;
-pub const TF_MA_MID: usize = 20;
-pub const TF_MA_LONG: usize = 50;
-
 /// RSI 計算週期 (共用)
 pub const RSI_PERIOD: usize = 14;
 
@@ -113,9 +94,6 @@ pub const BOLL_PERIOD: usize = 20;
 /// Bollinger Bands 標準差倍數
 pub const BOLL_STD_MULTIPLIER: f64 = 2.0;
 
-/// trend_follow_v1：RSI 過熱門檻，超過此值且轉弱才出場
-pub const TF_RSI_OVERBOUGHT: f64 = 75.0;
-
 /// breakout_v1：RSI 過熱門檻，高於此值不追高進場
 pub const BO_RSI_OVERBOUGHT: f64 = 80.0;
 
@@ -123,9 +101,6 @@ pub const BO_RSI_OVERBOUGHT: f64 = 80.0;
 pub const BO_MACD_FAST: usize = 12;
 pub const BO_MACD_SLOW: usize = 26;
 pub const BO_MACD_SIGNAL: usize = 9;
-
-/// trend_follow_v1：弱勢進場的倉位比例（相對於 position_size_percent）
-pub const TF_WEAK_SIGNAL_POSITION_RATIO: f64 = 0.5;
 
 /// mean_reversion_v1：RSI 超賣門檻，低於此值才進場
 pub const MR_RSI_OVERSOLD: f64 = 45.0;

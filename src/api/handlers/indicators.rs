@@ -1,6 +1,6 @@
 use crate::api::middleware::ApiError;
 use crate::app_state::AppState;
-use crate::core::indicators::factory::IndicatorFactory;
+use crate::domain::indicators::factory::IndicatorFactory;
 use crate::models::indicators::{ComputeIndicatorsRequest, ComputeIndicatorsResponse};
 use crate::models::Interval;
 use axum::{extract::State, Json};

@@ -1,5 +1,5 @@
-use crate::core::indicators::ma::compute_sma;
-use crate::core::indicators::traits::IndicatorCalculator;
+use crate::domain::indicators::ma::compute_sma;
+use crate::domain::indicators::traits::IndicatorCalculator;
 use crate::models::{Candle, IndicatorValue};
 use std::collections::HashMap;
 

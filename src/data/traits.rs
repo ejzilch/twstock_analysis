@@ -5,8 +5,8 @@
 /// 測試時可注入 mock，生產時注入真實實作。
 use async_trait::async_trait;
 
-use crate::core::BridgeError;
 use crate::data::models::RawCandle;
+use crate::domain::BridgeError;
 
 // ── DbWriter ──────────────────────────────────────────────────────────────────
 

@@ -1,5 +1,6 @@
 use crate::models::Interval;
 use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 use std::collections::HashMap;
 
 /// 系統內部計算使用的 K 線資料 (domain model)
@@ -47,4 +48,10 @@ pub struct MacdValue {
     pub macd_line: f64,
     pub signal_line: f64,
     pub histogram: f64,
+}
+
+#[derive(Debug, FromRow, Clone)]
+pub struct CandleRow {
+    pub timestamp_ms: i64,
+    pub close: f64,
 }

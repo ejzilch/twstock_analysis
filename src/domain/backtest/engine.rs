@@ -1,96 +1,84 @@
-use crate::api::middleware::ApiError;
-use crate::app_state::AppState;
-use crate::constants::{
-    BOLL_PERIOD, BOLL_STD_MULTIPLIER, BO_MACD_FAST, BO_MACD_SIGNAL, BO_MACD_SLOW,
-    DEFAULT_AVG_CONSECUTIVE_LOSSES, RSI_PERIOD, TF_MA_LONG, TF_MA_MID, TF_MA_SHORT,
+/// 回測引擎核心（純計算，零 I/O）
+///
+/// 職責：接收 K 線資料與策略參數，執行模擬交易，回傳指標結果。
+/// 不依賴任何資料庫、HTTP、Redis。可單元測試。
+use super::metrics::{compute_annualized_return, compute_max_drawdown, compute_sharpe_ratio};
+use crate::api::backtest::dto::response::{BacktestMetrics, TradeRecord};
+use crate::api::backtest::dto::types::{
+    COMMISSION_RATE, DEFAULT_EXIT_FILTER_THRESHOLD, DEFAULT_MIN_HOLDING_DAYS, HARD_STOP_LOSS_PCT,
+    RISK_FREE_ANNUAL, TAX_RATE,
 };
-use crate::core::indicators::{
+use crate::constants::{
+    BOLL_PERIOD, BOLL_STD_MULTIPLIER, BO_MACD_FAST, BO_MACD_SIGNAL, BO_MACD_SLOW, RSI_PERIOD,
+};
+use crate::domain::indicators::{
     bollinger::compute_bollinger, ma::compute_sma, macd::compute_macd, rsi::compute_rsi,
 };
-use crate::models::candle::MacdValue;
-use axum::{extract::State, Json};
-use chrono::Utc;
-use std::sync::Arc;
-
-use super::cost::{compute_annualized_return, compute_max_drawdown, compute_sharpe_ratio};
-use super::types::{
-    BacktestMetrics, BacktestRequest, BacktestResponse, CandleRow, TradeRecord, COMMISSION_RATE,
-    DEFAULT_EXIT_FILTER_THRESHOLD, DEFAULT_MIN_HOLDING_DAYS, HARD_STOP_LOSS_PCT, RISK_FREE_ANNUAL,
-    TAX_RATE,
+use crate::domain::strategy::constants::{
+    DEFAULT_AVG_CONSECUTIVE_LOSSES, TF_MA_LONG, TF_MA_MID, TF_MA_SHORT,
 };
-use crate::api::handlers::backtest::market_filter::{
+use crate::domain::strategy::manual_strategy::market_filter::{
     compute_bandwidth_series, is_market_tradeable,
 };
-use crate::api::handlers::backtest::strategy::{
+use crate::domain::strategy::manual_strategy::{
     breakout::{breakout_should_enter, breakout_should_exit},
     mean_reversion::{mean_reversion_should_enter, mean_reversion_should_exit},
     should_hold_position,
     trend_follow::{trend_follow_entry, trend_follow_should_exit},
 };
-/// POST /api/v1/backtest
-pub async fn backtest_handler(
-    State(state): State<Arc<AppState>>,
-    Json(request): Json<BacktestRequest>,
-) -> Result<Json<BacktestResponse>, ApiError> {
-    // ── 基本參數驗證 ──────────────────────────────────────────────────────────
-    if request.initial_capital <= 0.0 {
-        return Err(ApiError::InvalidIndicatorConfig {
-            detail: "initial_capital must be greater than 0".to_string(),
-        });
-    }
-    if !(1.0..=100.0).contains(&request.position_size_percent) {
-        return Err(ApiError::InvalidIndicatorConfig {
-            detail: "position_size_percent must be between 1 and 100".to_string(),
-        });
-    }
-    if request.from_ms >= request.to_ms {
-        return Err(ApiError::InvalidIndicatorConfig {
-            detail: "from_ms must be earlier than to_ms".to_string(),
-        });
-    }
 
-    // ── 取得 K 線資料 ─────────────────────────────────────────────────────────
-    let candles: Vec<CandleRow> = sqlx::query_as::<_, CandleRow>(
-        r#"
-        SELECT timestamp_ms, close
-        FROM candles
-        WHERE symbol = $1
-          AND interval = '1d'
-          AND timestamp_ms >= $2
-          AND timestamp_ms <= $3
-        ORDER BY timestamp_ms ASC
-        "#,
-    )
-    .bind(&request.symbol)
-    .bind(request.from_ms)
-    .bind(request.to_ms)
-    .fetch_all(&state.db_pool)
-    .await
-    .map_err(|e| ApiError::Internal(anyhow::anyhow!("Backtest candle query failed: {e}")))?;
+use crate::models::candle::{CandleRow, MacdValue};
+use chrono::Utc;
 
-    if candles.len() < 3 {
-        return Err(ApiError::InvalidIndicatorConfig {
-            detail: "not enough candle data for backtest (need at least 3 daily candles)"
-                .to_string(),
-        });
-    }
+// ── 輸入 / 輸出 ───────────────────────────────────────────────────────────────
+
+/// 引擎輸入：K 線資料 + 策略設定
+pub struct BacktestInput<'a> {
+    pub candles: &'a [CandleRow],
+    pub strategy_name: String,
+    pub initial_capital: f64,
+    pub position_size_percent: f64,
+    /// 出場緩衝濾網：持倉中訊號轉空時，需跌破前收盤幾 % 才真正出場。
+    /// 不傳時使用預設值 1.5%（DEFAULT_EXIT_FILTER_THRESHOLD）。
+    /// 傳 0.0 則等同停用濾網（還原為原始行為）。
+    pub exit_filter_pct: Option<f64>,
+    /// 最短持倉天數：進場後至少持有幾天才允許出場訊號生效。
+    /// 不傳時使用預設值 5 天（DEFAULT_MIN_HOLDING_DAYS）。
+    /// 傳 0 則等同停用（任何時候都可出場）。
+    pub min_holding_days: Option<u32>,
+}
+
+/// 引擎輸出：完整回測結果（不含 symbol / from_ms 等 metadata，由 Service 補充）
+pub struct BacktestOutput {
+    pub final_capital: f64,
+    pub exit_filter_pct: f64,
+    pub trades: Vec<TradeRecord>,
+    pub metrics: BacktestMetrics,
+    pub created_at_ms: i64,
+}
+
+// ── 引擎入口 ──────────────────────────────────────────────────────────────────
+
+/// 執行回測，回傳結果。
+///
+/// 所有錯誤以 `anyhow::Error` 回傳，由上層（Service）轉換為 ApiError。
+pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
+    let candles = input.candles;
 
     // ── 解析請求參數 ──────────────────────────────────────────────────────────
-    let position_fraction = request.position_size_percent / 100.0;
+    let position_fraction = input.position_size_percent / 100.0;
 
-    let exit_filter_threshold = match request.exit_filter_pct {
+    let exit_filter_threshold = match input.exit_filter_pct {
         Some(v) if v < 0.0 => {
-            return Err(ApiError::InvalidIndicatorConfig {
-                detail: "exit_filter_pct must be >= 0.0".to_string(),
-            });
+            anyhow::bail!("exit_filter_pct must be >= 0.0");
         }
         Some(v) => v / 100.0,
         None => DEFAULT_EXIT_FILTER_THRESHOLD,
     };
 
-    let min_holding_days = match request.min_holding_days {
+    let min_holding_days = match input.min_holding_days {
         Some(v) => v,
-        None => match request.strategy_name.as_str() {
+        None => match input.strategy_name.as_str() {
             "mean_reversion_v1" => 2,
             _ => DEFAULT_MIN_HOLDING_DAYS,
         },
@@ -98,7 +86,7 @@ pub async fn backtest_handler(
 
     // ── 預算指標序列 ──────────────────────────────────────────────────────────
     let closes: Vec<f64> = candles.iter().map(|c| c.close).collect();
-    let bandwidth_series = compute_bandwidth_series(&candles);
+    let bandwidth_series = compute_bandwidth_series(candles);
     let ma5_series = compute_sma(&closes, TF_MA_SHORT);
     let ma20_series = compute_sma(&closes, TF_MA_MID);
     let ma50_series = compute_sma(&closes, TF_MA_LONG);
@@ -109,7 +97,7 @@ pub async fn backtest_handler(
         compute_macd(&closes, BO_MACD_FAST, BO_MACD_SLOW, BO_MACD_SIGNAL);
 
     // ── 持倉狀態 ──────────────────────────────────────────────────────────────
-    let mut equity: f64 = request.initial_capital;
+    let mut equity: f64 = input.initial_capital;
     let mut equity_curve: Vec<f64> = vec![equity];
     let mut strategy_daily_returns: Vec<f64> = Vec::with_capacity(candles.len().saturating_sub(2));
 
@@ -134,9 +122,8 @@ pub async fn backtest_handler(
     let mut loss_streaks: Vec<u32> = Vec::new();
     let mut trades: Vec<TradeRecord> = Vec::new();
 
-    // ── 主迴圈：訊號在第 i 日收盤確認，第 i+1 日收盤成交 ────────────────────
+    // ── 主迴圈 ────────────────────────────────────────────────────────────────
     for i in 1..candles.len().saturating_sub(1) {
-        // Layer 0：市場環境過濾
         if !is_market_tradeable(&bandwidth_series, i) {
             if in_position {
                 holding_days += 1;
@@ -150,74 +137,33 @@ pub async fn backtest_handler(
             continue;
         }
 
-        // ── 依策略取得進出場訊號 ──────────────────────────────────────────────
-        let (should_hold, actual_position_fraction) = match request.strategy_name.as_str() {
-            "trend_follow_v1" => trend_follow_entry(
-                &ma5_series,
-                &ma20_series,
-                &ma50_series,
-                &closes,
-                position_fraction,
-                i,
-            ),
-            "mean_reversion_v1" => {
-                let close = candles[i].close;
-                let (_, _, boll_lower) = boll_series[i];
-                let hold =
-                    mean_reversion_should_enter(close, ma50_series[i], rsi_series[i], boll_lower);
-                (hold, position_fraction)
-            }
-            "breakout_v1" => {
-                if i < 1 {
-                    (false, 0.0)
-                } else {
-                    let close = candles[i].close;
-                    let (boll_upper, _, _) = boll_series[i];
-                    let macd_curr = &macd_series[i];
-                    let macd_prev = &macd_series[i - 1];
-                    if macd_curr.macd_line.is_nan() || macd_prev.macd_line.is_nan() {
-                        (false, 0.0)
-                    } else {
-                        let hold = breakout_should_enter(
-                            close,
-                            boll_upper,
-                            macd_curr.histogram,
-                            macd_prev.histogram,
-                            rsi_series[i],
-                        );
-                        (hold, position_fraction)
-                    }
-                }
-            }
-            _ => {
-                let hold = should_hold_position(&request.strategy_name, &candles, i);
-                (hold, position_fraction)
-            }
-        };
+        let (should_hold, actual_position_fraction) = resolve_entry_signal(
+            input,
+            &ma5_series,
+            &ma20_series,
+            &ma50_series,
+            &closes,
+            &boll_series,
+            &rsi_series,
+            &macd_series,
+            candles,
+            position_fraction,
+            i,
+        );
 
-        // ── 出場訊號 ──────────────────────────────────────────────────────────
-        let strategy_wants_exit = match request.strategy_name.as_str() {
-            "trend_follow_v1" => {
-                trend_follow_should_exit(&ma5_series, &ma20_series, &ma50_series, &rsi_series, i)
-            }
-            "mean_reversion_v1" => {
-                let close = candles[i].close;
-                let (_, boll_middle, _) = boll_series[i];
-                mean_reversion_should_exit(close, ma50_series[i], boll_middle)
-            }
-            "breakout_v1" => {
-                let macd_curr = &macd_series[i];
-                if macd_curr.macd_line.is_nan() {
-                    false
-                } else {
-                    let (boll_upper, _, _) = boll_series[i];
-                    breakout_should_exit(candles[i].close, boll_upper, macd_curr.histogram)
-                }
-            }
-            _ => !should_hold,
-        };
+        let strategy_wants_exit = resolve_exit_signal(
+            input,
+            &ma5_series,
+            &ma20_series,
+            &ma50_series,
+            &rsi_series,
+            &boll_series,
+            &macd_series,
+            candles,
+            should_hold,
+            i,
+        );
 
-        // ── 出場緩衝濾網 ──────────────────────────────────────────────────────
         let signal_close = candles[i].close;
         let signal_prev = candles[i.saturating_sub(1)].close;
         let drop_ratio = if signal_prev > 0.0 {
@@ -226,20 +172,19 @@ pub async fn backtest_handler(
             0.0
         };
 
-        // ── 硬停損 ────────────────────────────────────────────────────────────
         let hard_stop_triggered = in_position
             && entry_price > 0.0
             && (exec_close - entry_price) / entry_price <= -HARD_STOP_LOSS_PCT;
 
         let can_exit = holding_days >= min_holding_days;
 
-        let signal_exit = match request.strategy_name.as_str() {
+        let signal_exit = match input.strategy_name.as_str() {
             "mean_reversion_v1" | "breakout_v1" => strategy_wants_exit && can_exit,
             _ => strategy_wants_exit && drop_ratio >= exit_filter_threshold && can_exit,
         };
+
         let should_exit = (signal_exit || hard_stop_triggered) && in_position;
 
-        // ── 進場 ──────────────────────────────────────────────────────────────
         if should_hold && !in_position {
             entry_timestamp_ms = candles[i + 1].timestamp_ms;
             let capital_deployed = equity * actual_position_fraction;
@@ -251,7 +196,6 @@ pub async fn backtest_handler(
             in_position = true;
             holding_days = 0;
         } else if should_exit {
-            // ── 出場 ──────────────────────────────────────────────────────────
             let market_value = position_units * exec_close;
             let sell_fee = market_value * (COMMISSION_RATE + TAX_RATE);
             let cash_received = market_value - sell_fee;
@@ -277,11 +221,6 @@ pub async fn backtest_handler(
                 &mut loss_streaks,
             );
 
-            in_position = false;
-            holding_days = 0;
-            position_units = 0.0;
-            position_cost = 0.0;
-
             if hard_stop_triggered {
                 tracing::debug!(entry_price, exec_close, "Hard stop-loss triggered");
             }
@@ -294,9 +233,13 @@ pub async fn backtest_handler(
                 net_pnl,
                 is_win: net_pnl >= 0.0,
             });
+
+            in_position = false;
+            holding_days = 0;
+            position_units = 0.0;
+            position_cost = 0.0;
         }
 
-        // ── 每日報酬 ──────────────────────────────────────────────────────────
         let day_return = if in_position {
             holding_days += 1;
             let position_value_today = position_units * exec_close;
@@ -349,7 +292,6 @@ pub async fn backtest_handler(
         });
     }
 
-    // 末日平倉後收尾連虧區間
     if consecutive_losses > 0 {
         loss_streaks.push(consecutive_losses);
     }
@@ -377,19 +319,10 @@ pub async fn backtest_handler(
 
     let max_drawdown = compute_max_drawdown(&equity_curve);
     let sharpe_ratio = compute_sharpe_ratio(&strategy_daily_returns, RISK_FREE_ANNUAL);
-    let annual_return = compute_annualized_return(
-        request.initial_capital,
-        equity,
-        strategy_daily_returns.len(),
-    );
+    let annual_return =
+        compute_annualized_return(input.initial_capital, equity, strategy_daily_returns.len());
 
-    Ok(Json(BacktestResponse {
-        backtest_id: format!("bt-{}", uuid::Uuid::new_v4()),
-        symbol: request.symbol,
-        strategy_name: request.strategy_name,
-        from_ms: request.from_ms,
-        to_ms: request.to_ms,
-        initial_capital: request.initial_capital,
+    Ok(BacktestOutput {
         final_capital: equity,
         exit_filter_pct: exit_filter_threshold * 100.0,
         trades,
@@ -408,11 +341,107 @@ pub async fn backtest_handler(
             max_consecutive_wins,
         },
         created_at_ms: Utc::now().timestamp_millis(),
-    }))
+    })
 }
 
-// ── 私有：統一的交易統計更新 ──────────────────────────────────────────────────
-// 進出場時呼叫一次，主迴圈與末日平倉都走同一條路徑。
+// ── 私有：進出場訊號解析 ──────────────────────────────────────────────────────
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_entry_signal(
+    input: &BacktestInput,
+    ma5_series: &[f64],
+    ma20_series: &[f64],
+    ma50_series: &[f64],
+    closes: &[f64],
+    boll_series: &[(f64, f64, f64)],
+    rsi_series: &[f64],
+    macd_series: &[MacdValue],
+    candles: &[CandleRow],
+    position_fraction: f64,
+    i: usize,
+) -> (bool, f64) {
+    match input.strategy_name.as_str() {
+        "trend_follow_v1" => trend_follow_entry(
+            ma5_series,
+            ma20_series,
+            ma50_series,
+            closes,
+            position_fraction,
+            i,
+        ),
+        "mean_reversion_v1" => {
+            let close = candles[i].close;
+            let (_, _, boll_lower) = boll_series[i];
+            let hold =
+                mean_reversion_should_enter(close, ma50_series[i], rsi_series[i], boll_lower);
+            (hold, position_fraction)
+        }
+        "breakout_v1" => {
+            if i < 1 {
+                (false, 0.0)
+            } else {
+                let close = candles[i].close;
+                let (boll_upper, _, _) = boll_series[i];
+                let macd_curr = &macd_series[i];
+                let macd_prev = &macd_series[i - 1];
+                if macd_curr.macd_line.is_nan() || macd_prev.macd_line.is_nan() {
+                    (false, 0.0)
+                } else {
+                    let hold = breakout_should_enter(
+                        close,
+                        boll_upper,
+                        macd_curr.histogram,
+                        macd_prev.histogram,
+                        rsi_series[i],
+                    );
+                    (hold, position_fraction)
+                }
+            }
+        }
+        _ => {
+            let hold = should_hold_position(&input.strategy_name, candles, i);
+            (hold, position_fraction)
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_exit_signal(
+    input: &BacktestInput,
+    ma5_series: &[f64],
+    ma20_series: &[f64],
+    ma50_series: &[f64],
+    rsi_series: &[f64],
+    boll_series: &[(f64, f64, f64)],
+    macd_series: &[MacdValue],
+    candles: &[CandleRow],
+    should_hold: bool,
+    i: usize,
+) -> bool {
+    match input.strategy_name.as_str() {
+        "trend_follow_v1" => {
+            trend_follow_should_exit(ma5_series, ma20_series, ma50_series, rsi_series, i)
+        }
+        "mean_reversion_v1" => {
+            let close = candles[i].close;
+            let (_, boll_middle, _) = boll_series[i];
+            mean_reversion_should_exit(close, ma50_series[i], boll_middle)
+        }
+        "breakout_v1" => {
+            let macd_curr = &macd_series[i];
+            if macd_curr.macd_line.is_nan() {
+                false
+            } else {
+                let (boll_upper, _, _) = boll_series[i];
+                breakout_should_exit(candles[i].close, boll_upper, macd_curr.histogram)
+            }
+        }
+        _ => !should_hold,
+    }
+}
+
+// ── 私有：統一交易統計更新 ────────────────────────────────────────────────────
+
 #[allow(clippy::too_many_arguments)]
 fn update_trade_stats(
     net_pnl: f64,
@@ -451,5 +480,80 @@ fn update_trade_stats(
             *max_consecutive_losses = *consecutive_losses;
             *max_consecutive_loss_amount = *current_loss_streak_amount;
         }
+    }
+}
+
+// ── 單元測試 ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_candles(closes: &[f64]) -> Vec<CandleRow> {
+        closes
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| CandleRow {
+                timestamp_ms: i as i64 * 86_400_000,
+                close: c,
+            })
+            .collect()
+    }
+
+    fn make_request<'a>(candles: &'a Vec<CandleRow>, strategy: &str) -> BacktestInput<'a> {
+        BacktestInput {
+            candles: candles,
+            strategy_name: strategy.to_string(),
+            initial_capital: 100_000.0,
+            position_size_percent: 100.0,
+            exit_filter_pct: None,
+            min_holding_days: None,
+        }
+    }
+
+    #[test]
+    fn test_run_returns_output_with_correct_initial_capital() {
+        // 需要足夠多的 K 線讓指標有效
+        let closes: Vec<f64> = (1..=60).map(|i| 100.0 + i as f64).collect();
+        let candles = make_candles(&closes);
+        let input = make_request(&candles, "trend_follow_v1");
+
+        let output = run(&input).unwrap();
+        // 初始資本合理範圍：不可能翻 10 倍
+        assert!(output.final_capital > 0.0);
+        assert!(output.final_capital < input.initial_capital * 10.0);
+    }
+
+    #[test]
+    fn test_run_with_insufficient_data_returns_zero_trades() {
+        let closes = vec![100.0, 101.0, 102.0];
+        let candles = make_candles(&closes);
+        let input = make_request(&candles, "trend_follow_v1");
+
+        let output = run(&input).unwrap();
+        // K 線不足，指標全 NaN，不應有任何交易
+        assert_eq!(output.trades.len(), 0);
+    }
+
+    #[test]
+    fn test_run_exit_filter_pct_negative_returns_error() {
+        let closes: Vec<f64> = (1..=60).map(|i| 100.0 + i as f64).collect();
+        let candles = make_candles(&closes);
+        let mut input = make_request(&candles, "trend_follow_v1");
+        input.exit_filter_pct = Some(-1.0);
+
+        assert!(run(&input).is_err());
+    }
+
+    #[test]
+    fn test_metrics_win_rate_between_0_and_1() {
+        let closes: Vec<f64> = (1..=80)
+            .map(|i| if i % 5 == 0 { 90.0 } else { 100.0 + i as f64 })
+            .collect();
+        let candles = make_candles(&closes);
+        let input = make_request(&candles, "mean_reversion_v1");
+
+        let output = run(&input).unwrap();
+        assert!(output.metrics.win_rate >= 0.0 && output.metrics.win_rate <= 1.0);
     }
 }

@@ -11,7 +11,7 @@ use crate::api::models::admin_sync::{
     GapProgress, SymbolProgress, SymbolSyncStatus, SyncStatus, SyncSummary,
 };
 use crate::constants::{REDIS_SYNC_KEY_PREFIX, REDIS_SYNC_TTL_SECS};
-use crate::core::BridgeError;
+use crate::domain::BridgeError;
 
 /// Redis 中儲存的完整同步狀態。
 #[derive(Debug, Serialize, Deserialize, Clone)]

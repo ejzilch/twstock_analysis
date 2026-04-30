@@ -1,6 +1,8 @@
+pub mod backtest;
 pub mod handlers;
 pub mod middleware;
 pub mod models;
+pub mod signal;
 
 use crate::api::handlers::admin_sync::{
     cancel_manual_sync, get_rate_limit_info, get_sync_status, get_sync_status_by_id,
@@ -8,19 +10,19 @@ use crate::api::handlers::admin_sync::{
 };
 
 use crate::api::{
+    backtest::handler::backtest_handler,
     handlers::{
-        backtest::engine::backtest_handler,
         candles::candles_handler,
         health::{health_handler, integrity_handler},
         indicators::compute_indicators_handler,
         predict::predict_handler,
-        signals::signals_handler,
         symbols::symbols_handler,
     },
     middleware::{
         auth::auth_middleware,
         rate_limit::{rate_limit_middleware, RateLimiterState},
     },
+    signal::handler::signals_handler,
 };
 use crate::app_state::AppState;
 use axum::{
