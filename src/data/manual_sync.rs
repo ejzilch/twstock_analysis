@@ -9,6 +9,7 @@
 ///   - 先查 DB 確認缺口，再打 FinMind API，不浪費請求配額
 ///   - 每批請求一個月的資料，控制單次請求大小
 ///   - 排程與手動同步共用 FinMindRateLimiter 實例
+///   - Redis 連線由呼叫端（AppState）統一管理，不在此自行建立
 use crate::constants::{FINMIND_API_TOKEN_ENV, MANUAL_SYNC_BATCH_DAYS};
 use crate::data::db::{sync_log_update_counts, sync_log_update_status, BulkInsertBuffer};
 use crate::data::fetch::{fetch_range, fetch_stock_info_map};
@@ -81,11 +82,6 @@ impl DateRange {
 // ── detect_gaps ───────────────────────────────────────────────────────────────
 
 /// 查詢 DB，計算指定股票清單的所有缺口。
-///
-/// 對每一檔股票、每一個粒度執行 SELECT MIN/MAX，
-/// 與 finmind_earliest_ms 比對，計算兩段缺口。
-///
-/// 不打 FinMind API，純 DB 查詢。
 pub async fn detect_gaps(
     db_pool: &PgPool,
     symbols: &[String],
@@ -100,13 +96,11 @@ pub async fn detect_gaps(
     let mut gaps = Vec::new();
 
     for symbol in symbols {
-        // 查詢 FinMind 最早可提供日期
         let finmind_earliest_ms = get_finmind_earliest_ms(db_pool, symbol).await?;
 
         let finmind_earliest = finmind_earliest_ms
             .map(ms_to_naive_date)
             .unwrap_or_else(|| {
-                // symbols metadata 不完整時，使用保守預設值，避免「誤判無須同步」
                 let fallback = today - Duration::days(365 * 13);
                 warn!(
                     symbol = %symbol,
@@ -137,7 +131,6 @@ async fn detect_gap_for_interval(
     today: NaiveDate,
     scope: &SyncScope,
 ) -> Result<GapInfo, BridgeError> {
-    // 查詢 DB 現有資料的頭尾
     let row = sqlx::query!(
         r#"
         SELECT
@@ -185,7 +178,6 @@ async fn detect_gap_for_interval(
     }
 
     let (gap_a, gap_b) = match (row.db_oldest_ms, row.db_newest_ms) {
-        // DB 完全無資料 → 全段補
         (None, _) | (_, None) => {
             info!(
                 symbol = %symbol,
@@ -203,7 +195,6 @@ async fn detect_gap_for_interval(
             let db_oldest = ms_to_naive_date(oldest_ms);
             let db_newest = ms_to_naive_date(newest_ms);
 
-            // 缺口 A（歷史段）：FinMind最早 ~ DB最舊 - 1天
             let gap_a = if range_start < db_oldest {
                 let to = (db_oldest - Duration::days(1)).min(range_end);
                 if range_start <= to {
@@ -215,10 +206,9 @@ async fn detect_gap_for_interval(
                     None
                 }
             } else {
-                None // 歷史段已完整
+                None
             };
 
-            // 缺口 B（近期段）：DB最新 + 1天 ~ 今天
             let gap_b = if db_newest < range_end {
                 let from = (db_newest + Duration::days(1)).max(range_start);
                 Some(DateRange {
@@ -226,7 +216,7 @@ async fn detect_gap_for_interval(
                     to_date: range_end,
                 })
             } else {
-                None // 近期段已是今天
+                None
             };
 
             (gap_a, gap_b)
@@ -244,12 +234,6 @@ async fn detect_gap_for_interval(
 // ── fetch_and_insert_gap ──────────────────────────────────────────────────────
 
 /// 對單一缺口分批請求 FinMind 並寫入 DB。
-///
-/// 每批請求 MANUAL_SYNC_BATCH_DAYS 天的資料（預設 30 天）。
-/// 每次請求前呼叫 rate_limiter.acquire()，達上限時自動等待。
-///
-/// # Returns
-/// (inserted, skipped, failed) 三個計數器。
 pub async fn fetch_and_insert_gap(
     db_pool: &PgPool,
     http_client: &Client,
@@ -266,7 +250,6 @@ pub async fn fetch_and_insert_gap(
     let total_batches = batches.len();
     let mut total_failed = 0i32;
 
-    // 紀錄這個缺口開始前，Buffer 內的狀態基準線
     let initial_inserted = buffer.total_inserted();
     let initial_skipped = buffer.total_skipped();
 
@@ -292,7 +275,6 @@ pub async fn fetch_and_insert_gap(
             return Err(BridgeError::internal("SYNC_CANCELLED"));
         }
 
-        // 記錄進度（rate limit 等待後從此繼續）
         rate_limiter
             .record_progress(SyncProgress {
                 current_symbol: gap_info.symbol.clone(),
@@ -301,7 +283,6 @@ pub async fn fetch_and_insert_gap(
             })
             .await;
 
-        // 等待 rate limit（達上限時會在此 async 等待 1 小時）
         rate_limiter.acquire().await.ok();
 
         let from_str = batch.from_date.to_string();
@@ -363,14 +344,11 @@ pub async fn fetch_and_insert_gap(
         }
     }
 
-    // 最終強制刷出 buffer 內的資料到資料庫
     buffer.flush(&writer, &mut invalidator).await?;
 
-    // 計算這個缺口實際寫入與跳過的精確數字
     let actual_inserted = buffer.total_inserted() - initial_inserted;
     let actual_skipped = buffer.total_skipped() - initial_skipped;
 
-    // 統一在這個缺口任務完成時，更新 sync_log
     if actual_inserted > 0 || actual_skipped > 0 {
         sync_log_update_counts(db_pool, sync_id, actual_inserted, actual_skipped, 0)
             .await
@@ -382,16 +360,14 @@ pub async fn fetch_and_insert_gap(
 
 // ── run_manual_sync（對外入口）────────────────────────────────────────────────
 
-/// 手動同步主流程，由 API handler 在背景 task 中呼叫。
+/// 手動同步主流程，由 admin_sync service 在背景 task 中呼叫。
 ///
-/// 流程：
-///   1. detect_gaps() 計算所有缺口
-///   2. 對每個缺口呼叫 fetch_and_insert_gap()
-///   3. 更新 sync_log status = 'completed'
+/// Redis 連線由呼叫端從 AppState 取得後傳入，不在此自行建立。
 pub async fn run_manual_sync(
     db_pool: PgPool,
     http_client: Client,
     rate_limiter: Arc<FinMindRateLimiter>,
+    mut redis_conn: MultiplexedConnection, // ← 由呼叫端傳入，不再自己 open
     sync_id: String,
     symbols: Vec<String>,
     scope: SyncScope,
@@ -399,29 +375,7 @@ pub async fn run_manual_sync(
 ) {
     info!(sync_id = %sync_id, symbols = ?symbols, "Manual sync started");
 
-    // 建立共用的 BulkInsertBuffer 和 Redis 連線
     let mut buffer = buffer.lock().await;
-    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1".into());
-    let redis_client = match redis::Client::open(redis_url) {
-        Ok(c) => c,
-        Err(e) => {
-            error!(error = %e, sync_id = %sync_id, "Failed to connect to Redis");
-            let _ =
-                sync_log_update_status(&db_pool, &sync_id, "failed", Some(current_timestamp_ms()))
-                    .await;
-            return;
-        }
-    };
-    let mut redis_conn = match redis_client.get_multiplexed_async_connection().await {
-        Ok(c) => c,
-        Err(e) => {
-            error!(error = %e, sync_id = %sync_id, "Failed to get Redis connection");
-            let _ =
-                sync_log_update_status(&db_pool, &sync_id, "failed", Some(current_timestamp_ms()))
-                    .await;
-            return;
-        }
-    };
 
     if let Err(e) =
         ensure_symbols_metadata(&db_pool, &http_client, &rate_limiter, &symbols, &sync_id).await
@@ -450,7 +404,6 @@ pub async fn run_manual_sync(
 
     // Step 2: 對每個缺口執行補資料
     for gap_info in &gaps {
-        // 處理缺口 A（歷史段）
         if let Some(ref gap_a) = gap_info.gap_a {
             let result = fetch_and_insert_gap(
                 &db_pool,
@@ -465,9 +418,7 @@ pub async fn run_manual_sync(
             .await;
 
             match result {
-                Ok((_, _, failed)) => {
-                    total_failed_batches += failed;
-                }
+                Ok((_, _, failed)) => total_failed_batches += failed,
                 Err(e) => {
                     has_gap_error = true;
                     error!(
@@ -480,7 +431,6 @@ pub async fn run_manual_sync(
             }
         }
 
-        // 處理缺口 B（近期段）
         if let Some(ref gap_b) = gap_info.gap_b {
             let result = fetch_and_insert_gap(
                 &db_pool,
@@ -495,9 +445,7 @@ pub async fn run_manual_sync(
             .await;
 
             match result {
-                Ok((_, _, failed)) => {
-                    total_failed_batches += failed;
-                }
+                Ok((_, _, failed)) => total_failed_batches += failed,
                 Err(e) => {
                     has_gap_error = true;
                     error!(
@@ -513,7 +461,6 @@ pub async fn run_manual_sync(
 
     // Step 3: 依執行結果標記最終狀態
     let completed_at = current_timestamp_ms();
-
     let final_status = if has_gap_error || total_failed_batches > 0 {
         "failed"
     } else {
@@ -617,7 +564,6 @@ mod tests {
 
     #[test]
     fn test_ms_to_naive_date() {
-        // 2026-01-01 00:00:00 UTC = 1735689600000 ms
         let date = ms_to_naive_date(1735689600000);
         assert_eq!(date.year(), 2026);
         assert_eq!(date.month(), 1);

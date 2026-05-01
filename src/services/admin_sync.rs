@@ -289,10 +289,13 @@ impl SyncService {
         scope: SyncScope,
         buffer: Arc<tokio::sync::Mutex<BulkInsertBuffer>>,
     ) {
+        // redis.clone() 取得副本傳給 run_manual_sync，
+        // 讓它在整個同步過程中使用 AppState 已建立的連線，不自行重建。
         run_manual_sync(
             db_pool.clone(),
             http_client,
             rate_limiter,
+            redis.clone(), // ← 傳入現有連線
             sync_id.clone(),
             symbols,
             scope,
