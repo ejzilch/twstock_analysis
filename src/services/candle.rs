@@ -6,42 +6,72 @@
 ///   3. 快取優先取得 K 線
 ///   4. 依請求計算指標
 ///   5. 組裝 CandlesApiResponse
-use std::collections::HashMap;
-
-use chrono::Utc;
-
-use crate::api::candle::dto::request::CandlesQueryParams;
-use crate::api::candle::dto::response::{CandleResponse, CandlesApiResponse};
-use crate::api::middleware::ApiError;
-use crate::api::models::enums::FetchSource;
 use crate::app_state::AppState;
 use crate::constants::CANDLES_MAX_PER_REQUEST;
 use crate::domain::indicators::factory::IndicatorFactory;
 use crate::models::indicators::{BollingerConfig, IndicatorConfig};
-use crate::models::{Candle, IndicatorValue, Interval};
+use crate::models::{Candle, FetchSource, IndicatorValue, Interval};
 
-pub struct CandleService;
+use anyhow::anyhow;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-impl CandleService {
+// service 層 model
+
+pub struct CandlesParams {
+    pub from_ms: i64,
+    pub to_ms: i64,
+    pub interval: Interval,
+    pub indicators: Vec<String>,
+}
+
+pub struct CandlesResult {
+    pub candles: Vec<CandleData>,
+    pub cached: bool,
+    pub total_available: usize,
+    pub count: usize,
+    /// 分頁游標，None 表示已取完全部資料
+    pub next_cursor: Option<String>,
+    /// 資料來源："database" / "cache"
+    pub source: FetchSource,
+    pub computed_at_ms: i64,
+}
+
+#[derive(Deserialize, Clone, Debug, Serialize)]
+pub struct CandleData {
+    pub timestamp_ms: i64,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
+    pub volume: u64,
+    pub indicators: HashMap<String, serde_json::Value>,
+}
+
+pub struct CandlesService;
+
+impl CandlesService {
     pub async fn query(
         state: &AppState,
         symbol: &str,
-        params: &CandlesQueryParams,
-    ) -> Result<CandlesApiResponse, ApiError> {
+        params: &CandlesParams,
+    ) -> anyhow::Result<CandlesResult> {
         // ── Step 1: 確認 symbol 存在 ──────────────────────────────────────────
         Self::validate_symbol(state, symbol).await?;
 
-        let interval = params.interval();
+        let interval = params.interval;
 
         // ── Step 2: 查詢總筆數，超過上限直接拒絕 ─────────────────────────────
         let total_available =
             Self::count_candles(state, symbol, interval, params.from_ms, params.to_ms).await?;
 
         if total_available > CANDLES_MAX_PER_REQUEST {
-            return Err(ApiError::QueryRangeTooLarge {
-                requested: total_available,
-                max: CANDLES_MAX_PER_REQUEST,
-            });
+            return Err(anyhow::anyhow!(
+                "Query range too large requested : {}, max : {}",
+                total_available,
+                CANDLES_MAX_PER_REQUEST
+            ));
         }
 
         // ── Step 3: 快取優先取得 K 線 ─────────────────────────────────────────
@@ -49,19 +79,13 @@ impl CandleService {
             Self::fetch_with_cache(state, symbol, interval, params.from_ms, params.to_ms).await?;
 
         // ── Step 4: 計算指標（若有請求）──────────────────────────────────────
-        if let Some(indicator_str) = &params.indicators {
-            if !indicator_str.trim().is_empty() {
-                Self::apply_indicators(state, symbol, interval, &mut candles, indicator_str);
-            }
+        if !params.indicators.is_empty() {
+            Self::apply_indicators(state, symbol, interval, &mut candles, &params.indicators);
         }
 
         let count = candles.len();
 
-        Ok(CandlesApiResponse {
-            symbol: symbol.to_string(),
-            interval,
-            from_ms: params.from_ms,
-            to_ms: params.to_ms,
+        Ok(CandlesResult {
             candles,
             count,
             total_available,
@@ -74,7 +98,7 @@ impl CandleService {
 
     // ── 私有方法 ──────────────────────────────────────────────────────────────
 
-    async fn validate_symbol(state: &AppState, symbol: &str) -> Result<(), ApiError> {
+    async fn validate_symbol(state: &AppState, symbol: &str) -> Result<(), anyhow::Error> {
         let exists: Option<bool> = sqlx::query_scalar!(
             r#"SELECT is_active as "is_active!" FROM symbols WHERE symbol = $1"#,
             symbol
@@ -83,14 +107,12 @@ impl CandleService {
         .await
         .map_err(|e| {
             tracing::error!(error = %e, symbol = %symbol, "DB error checking symbol");
-            ApiError::DataSourceInterrupted
+            anyhow!("Data source interrupted")
         })?;
 
         match exists {
             Some(_) => Ok(()),
-            None => Err(ApiError::SymbolNotFound {
-                symbol: symbol.to_string(),
-            }),
+            None => Err(anyhow!(symbol.to_string())),
         }
     }
 
@@ -100,7 +122,7 @@ impl CandleService {
         interval: Interval,
         from_ms: i64,
         to_ms: i64,
-    ) -> Result<usize, ApiError> {
+    ) -> Result<usize, anyhow::Error> {
         let count: i64 = sqlx::query_scalar!(
             r#"
             SELECT COUNT(*) AS "count!"
@@ -117,7 +139,7 @@ impl CandleService {
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to count candles");
-            ApiError::DataSourceInterrupted
+            anyhow!("Data source interrupted")
         })?;
 
         Ok(count as usize)
@@ -129,7 +151,7 @@ impl CandleService {
         interval: Interval,
         from_ms: i64,
         to_ms: i64,
-    ) -> Result<(Vec<CandleResponse>, FetchSource, bool), ApiError> {
+    ) -> Result<(Vec<CandleData>, FetchSource, bool), anyhow::Error> {
         let cache_key = format!("indicators:{symbol}:{interval}");
         let mut conn = state.redis_client.clone();
 
@@ -139,7 +161,7 @@ impl CandleService {
             .await;
 
         if let Ok(Some(json_str)) = cached {
-            if let Ok(candles) = serde_json::from_str::<Vec<CandleResponse>>(&json_str) {
+            if let Ok(candles) = serde_json::from_str::<Vec<CandleData>>(&json_str) {
                 tracing::debug!(symbol = %symbol, "Cache hit for candles");
                 return Ok((candles, FetchSource::Cache, true));
             }
@@ -155,7 +177,7 @@ impl CandleService {
         interval: Interval,
         from_ms: i64,
         to_ms: i64,
-    ) -> Result<Vec<CandleResponse>, ApiError> {
+    ) -> Result<Vec<CandleData>, anyhow::Error> {
         struct CandleRow {
             timestamp_ms: i64,
             open: f64,
@@ -183,12 +205,12 @@ impl CandleService {
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to fetch candles from DB");
-            ApiError::DataSourceInterrupted
+            anyhow!("Data source interrupted")
         })?;
 
         Ok(rows
             .into_iter()
-            .map(|row| CandleResponse {
+            .map(|row| CandleData {
                 timestamp_ms: row.timestamp_ms,
                 open: row.open,
                 high: row.high,
@@ -205,10 +227,10 @@ impl CandleService {
         _state: &AppState,
         symbol: &str,
         interval: Interval,
-        candles: &mut Vec<CandleResponse>,
-        indicator_str: &str,
+        candles: &mut Vec<CandleData>,
+        indicators: &Vec<String>,
     ) {
-        let indicator_request = parse_indicator_request(indicator_str);
+        let indicator_request = parse_indicator_request(indicators);
         if indicator_request.is_empty() {
             return;
         }
@@ -245,12 +267,12 @@ impl CandleService {
 // ── 純函數：指標解析與填充 ────────────────────────────────────────────────────
 
 /// "ma5,ma20,rsi,macd,bollinger" → IndicatorFactory 需要的 HashMap
-pub fn parse_indicator_request(indicator_str: &str) -> HashMap<String, IndicatorConfig> {
+pub fn parse_indicator_request(indicators: &Vec<String>) -> HashMap<String, IndicatorConfig> {
     let mut map: HashMap<String, IndicatorConfig> = HashMap::new();
     let mut ma_periods: Vec<u32> = vec![];
 
-    for key in indicator_str.split(',').map(|s| s.trim()) {
-        match key {
+    for key in indicators {
+        match key.as_str() {
             "ma5" => ma_periods.push(5),
             "ma20" => ma_periods.push(20),
             "ma50" => ma_periods.push(50),
@@ -285,7 +307,7 @@ pub fn parse_indicator_request(indicator_str: &str) -> HashMap<String, Indicator
 
 /// 計算結果填入 CandleResponse.indicators
 pub fn fill_indicators(
-    candles: &mut Vec<CandleResponse>,
+    candles: &mut Vec<CandleData>,
     computed: &HashMap<String, Vec<IndicatorValue>>,
 ) {
     for (key, values) in computed {
@@ -336,7 +358,12 @@ mod tests {
 
     #[test]
     fn test_parse_indicator_request_ma() {
-        let result = parse_indicator_request("ma5,ma20,ma50");
+        let indicators: Vec<String> = "ma5,ma20,ma50"
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let result = parse_indicator_request(&indicators);
         assert!(result.contains_key("ma"));
         if let Some(IndicatorConfig::Periods(periods)) = result.get("ma") {
             assert!(periods.contains(&5));
@@ -349,13 +376,23 @@ mod tests {
 
     #[test]
     fn test_parse_indicator_request_rsi() {
-        let result = parse_indicator_request("rsi");
+        let indicators: Vec<String> = "rsi"
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let result = parse_indicator_request(&indicators);
         assert!(result.contains_key("rsi"));
     }
 
     #[test]
     fn test_parse_indicator_request_macd() {
-        let result = parse_indicator_request("macd");
+        let indicators: Vec<String> = "macd"
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let result = parse_indicator_request(&indicators);
         if let Some(IndicatorConfig::Periods(periods)) = result.get("macd") {
             assert_eq!(*periods, vec![12, 26, 9]);
         } else {
@@ -365,7 +402,12 @@ mod tests {
 
     #[test]
     fn test_parse_indicator_request_bollinger() {
-        let result = parse_indicator_request("bollinger");
+        let indicators: Vec<String> = "bollinger"
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let result = parse_indicator_request(&indicators);
         assert!(matches!(
             result.get("bollinger"),
             Some(IndicatorConfig::Bollinger(_))
@@ -374,13 +416,23 @@ mod tests {
 
     #[test]
     fn test_parse_indicator_request_ignores_unknown() {
-        let result = parse_indicator_request("ma5,unknown_indicator");
+        let indicators: Vec<String> = "ma5,unknown_indicator"
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let result = parse_indicator_request(&indicators);
         assert!(!result.contains_key("unknown_indicator"));
     }
 
     #[test]
     fn test_parse_indicator_request_empty_string() {
-        let result = parse_indicator_request("");
+        let indicators: Vec<String> = ""
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let result = parse_indicator_request(&indicators);
         assert!(result.is_empty());
     }
 }

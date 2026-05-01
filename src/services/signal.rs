@@ -8,18 +8,28 @@
 ///
 /// handler 只需呼叫 `SignalService::generate()`，不含任何 AI 或降級邏輯。
 use crate::ai_client::client::PredictRequest;
-use crate::api::middleware::ApiError;
-use crate::api::signal::dto::response::{SignalsApiResponse, TradeSignalResponse};
 use crate::app_state::AppState;
 use crate::constants::{
     AI_SERVICE_TIMEOUT_SECS, ERROR_AI_SERVICE_TIMEOUT, ERROR_AI_SERVICE_UNAVAILABLE,
 };
-use crate::domain::signal::aggregator::{build_ai_signal, build_technical_fallback_signal};
+use crate::domain::signal::aggregator::{
+    build_ai_signal, build_technical_fallback_signal, TradeSignal,
+};
 use crate::domain::BridgeError;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::time::timeout;
 use uuid::Uuid;
+
+/// signal 的 model
+#[derive(Debug, Clone)]
+pub struct Signals {
+    pub symbol: String,
+    pub from_ms: i64,
+    pub to_ms: i64,
+    pub signals: Vec<TradeSignal>,
+    pub count: usize,
+}
 
 pub struct SignalService;
 
@@ -30,14 +40,14 @@ impl SignalService {
         symbol: &str,
         from_ms: i64,
         to_ms: i64,
-    ) -> Result<SignalsApiResponse, ApiError> {
+    ) -> anyhow::Result<Signals> {
         // ── Step 1: 取得指標 ──────────────────────────────────────────────────
         let indicators = Self::fetch_indicators(state, symbol).await;
 
         // ── Step 2: 嘗試 AI 預測，timeout 後自動降級 ─────────────────────────
         let signal = Self::generate_signal(state, symbol, &indicators, from_ms).await;
 
-        Ok(SignalsApiResponse {
+        Ok(Signals {
             symbol: symbol.to_string(),
             from_ms,
             to_ms,
@@ -53,7 +63,7 @@ impl SignalService {
         symbol: &str,
         indicators: &HashMap<String, f64>,
         timestamp_ms: i64,
-    ) -> TradeSignalResponse {
+    ) -> TradeSignal {
         let predict_request = PredictRequest {
             request_id: Uuid::new_v4().to_string(),
             symbol: symbol.to_string(),

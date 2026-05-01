@@ -10,3 +10,4 @@ pub mod admin_sync;
 pub mod backtest;
 pub mod candle;
 pub mod signal;
+pub mod sync_state;

@@ -5,20 +5,17 @@
 ///   2. 檢查 Redis 是否已有同步進行中
 ///   3. 建立 SyncState、寫入 sync_log
 ///   4. 啟動背景 task，追蹤最終狀態
-///   5. 組裝 ManualSyncAcceptedResponse
+///   5. 組裝 StartSyncResult
 ///
 /// admin_sync handler 只做 parse → call service → return response。
 use chrono::{Local, Months, NaiveDate};
 use redis::aio::MultiplexedConnection;
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
-use crate::api::handlers::admin_sync::{ManualSyncAcceptedResponse, SyncStatus};
-use crate::api::handlers::sync_state::{find_running_sync, save_sync_state, SyncState};
-use crate::api::middleware::ApiError;
-use crate::api::models::SyncMode;
 use crate::app_state::AppState;
 use crate::constants::{FINMIND_RATE_LIMIT_BUFFER, FINMIND_RATE_LIMIT_PER_HOUR};
 use crate::data::db::{sync_log_create, SyncLogEntry};
@@ -26,6 +23,9 @@ use crate::data::fetch_rate_limiter::FinMindRateLimiter;
 use crate::data::manual_sync::{run_manual_sync, SyncScope};
 use crate::data::models::current_timestamp_ms;
 use crate::domain::BridgeError;
+use crate::models::enums::{SymbolSyncStatus, SyncMode, SyncStatus};
+
+use super::sync_state::{find_running_sync, save_sync_state, SyncState};
 
 // ── 請求 DTO ──────────────────────────────────────────────────────────────────
 
@@ -40,6 +40,49 @@ pub struct StartSyncRequest {
     pub intervals: Vec<crate::models::enums::Interval>,
 }
 
+#[derive(serde::Serialize)]
+pub struct StartSyncResult {
+    pub sync_id: String,
+    pub symbols: Vec<String>,
+    pub status: SyncStatus,
+    pub estimated_requests: u64,
+    pub estimated_hours: u64,
+    pub started_at_ms: i64,
+}
+
+/// 整體同步結果摘要
+#[derive(Debug, Serialize, Default, Clone, Deserialize)]
+pub struct SyncSummary {
+    pub total_symbols: usize,
+    pub completed_symbols: usize,
+    pub total_inserted: i32,
+    pub total_skipped: i32,
+    pub total_failed: i32,
+}
+
+/// 單一股票的同步進度
+#[derive(Debug, Serialize, Clone, Deserialize)]
+pub struct SymbolProgress {
+    pub symbol: String,
+    pub name: String,
+    pub status: SymbolSyncStatus,
+    /// 缺口 A（歷史段）進度，None 表示無此缺口
+    pub gap_a: Option<GapProgress>,
+    /// 缺口 B（近期段）進度，None 表示無此缺口
+    pub gap_b: Option<GapProgress>,
+}
+
+/// 單一缺口的進度
+#[derive(Debug, Serialize, Clone, Deserialize)]
+pub struct GapProgress {
+    pub from_ms: i64,
+    pub to_ms: i64,
+    pub inserted: i32,
+    pub skipped: i32,
+    pub failed: i32,
+    pub completed: bool,
+}
+
 // ── Service 入口 ──────────────────────────────────────────────────────────────
 
 pub struct SyncService;
@@ -49,7 +92,7 @@ impl SyncService {
     pub async fn start(
         state: &AppState,
         req: StartSyncRequest,
-    ) -> Result<ManualSyncAcceptedResponse, SyncServiceError> {
+    ) -> Result<StartSyncResult, SyncServiceError> {
         // ── Step 1: 解析目標 symbols ──────────────────────────────────────────
         let symbols = Self::resolve_symbols(state, &req).await?;
 
@@ -57,7 +100,7 @@ impl SyncService {
         let (from_date, to_date) = Self::resolve_date_range(&req)?;
 
         // 驗證日期順序
-        if let (Some(from), Some(to)) = (from_date, to_date) {
+        if let (Some(from), Some(to)) = (from_date.as_ref(), to_date.as_ref()) {
             if from > to {
                 return Err(SyncServiceError::InvalidRequest(
                     "from_date must be earlier than or equal to to_date".to_string(),
@@ -145,7 +188,7 @@ impl SyncService {
             "Manual sync accepted, background task started"
         );
 
-        Ok(ManualSyncAcceptedResponse {
+        Ok(StartSyncResult {
             sync_id,
             status: SyncStatus::Running,
             symbols,
@@ -272,27 +315,9 @@ impl SyncService {
 /// SyncService 特有的錯誤，由 handler 轉換為對應的 HTTP response
 #[derive(Debug)]
 pub enum SyncServiceError {
-    /// 已有同步進行中，帶 running sync_id
-    AlreadyRunning(String),
-    /// 請求參數無效
-    InvalidRequest(String),
-    /// 內部錯誤
-    Internal(String),
-}
-
-impl From<SyncServiceError> for ApiError {
-    fn from(e: SyncServiceError) -> Self {
-        match e {
-            // AlreadyRunning 由 handler 特殊處理（回 409），不走 ApiError
-            SyncServiceError::AlreadyRunning(_) => ApiError::Internal(anyhow::anyhow!(
-                "SyncService::AlreadyRunning should be handled by handler"
-            )),
-            SyncServiceError::InvalidRequest(msg) => {
-                ApiError::InvalidIndicatorConfig { detail: msg }
-            }
-            SyncServiceError::Internal(msg) => ApiError::Internal(anyhow::anyhow!(msg)),
-        }
-    }
+    AlreadyRunning(String), // → handler 回傳 409
+    InvalidRequest(String), // → handler 回傳 400
+    Internal(String),       // → handler 回傳 500
 }
 
 // ── 共用查詢函數 ──────────────────────────────────────────────────────────────
@@ -311,7 +336,8 @@ async fn fetch_final_sync_state_from_db(
     db_pool: &PgPool,
     sync_id: &str,
 ) -> Result<Option<SyncState>, BridgeError> {
-    use crate::api::handlers::admin_sync::{SymbolProgress, SymbolSyncStatus, SyncSummary};
+    use crate::models::enums::SymbolSyncStatus;
+    use crate::services::admin_sync::SyncSummary;
 
     let row = sqlx::query!(
         r#"

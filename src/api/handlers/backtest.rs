@@ -36,11 +36,11 @@ pub struct BacktestRequest {
     pub min_holding_days: Option<u32>,
 }
 
-impl From<BacktestRequest> for BacktestParams {
-    fn from(request: BacktestRequest) -> Self {
+impl From<&BacktestRequest> for BacktestParams {
+    fn from(request: &BacktestRequest) -> Self {
         BacktestParams {
-            symbol: request.symbol,
-            strategy_name: request.strategy_name,
+            symbol: request.symbol.clone(),
+            strategy_name: request.strategy_name.clone(),
             from_ms: request.from_ms,
             to_ms: request.to_ms,
             initial_capital: request.initial_capital,
@@ -75,7 +75,7 @@ pub async fn backtest_handler(
     State(state): State<Arc<AppState>>,
     Json(request): Json<BacktestRequest>,
 ) -> Result<Json<BacktestResponse>, ApiError> {
-    let params = BacktestParams::from(request);
+    let params = BacktestParams::from(&request);
     let output = BacktestService::run(&state, &params).await.map_err(|e| {
         ApiError::InvalidIndicatorConfig {
             detail: e.to_string(),

@@ -5,8 +5,9 @@
 /// ApiError 透過 IntoResponse 自動轉換為正確的 HTTP response。
 pub mod admin_sync;
 pub mod backtest;
+pub mod candle;
 pub mod health;
 pub mod indicators;
 pub mod predict;
+pub mod signal;
 pub mod symbols;
-pub mod sync_state;
