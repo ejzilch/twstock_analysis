@@ -2,12 +2,11 @@
 ///
 /// 職責：接收 K 線資料與策略參數，執行模擬交易，回傳指標結果。
 /// 不依賴任何資料庫、HTTP、Redis。可單元測試。
-use super::metrics::{compute_annualized_return, compute_max_drawdown, compute_sharpe_ratio};
-use crate::api::backtest::dto::response::{BacktestMetrics, TradeRecord};
-use crate::api::backtest::dto::types::{
+use super::constants::{
     COMMISSION_RATE, DEFAULT_EXIT_FILTER_THRESHOLD, DEFAULT_MIN_HOLDING_DAYS, HARD_STOP_LOSS_PCT,
     RISK_FREE_ANNUAL, TAX_RATE,
 };
+use super::metrics::{compute_annualized_return, compute_max_drawdown, compute_sharpe_ratio};
 use crate::constants::{
     BOLL_PERIOD, BOLL_STD_MULTIPLIER, BO_MACD_FAST, BO_MACD_SIGNAL, BO_MACD_SLOW, RSI_PERIOD,
 };
@@ -29,6 +28,7 @@ use crate::domain::strategy::manual_strategy::{
 
 use crate::models::candle::{CandleRow, MacdValue};
 use chrono::Utc;
+use serde::Serialize;
 
 // ── 輸入 / 輸出 ───────────────────────────────────────────────────────────────
 
@@ -55,6 +55,44 @@ pub struct BacktestOutput {
     pub trades: Vec<TradeRecord>,
     pub metrics: BacktestMetrics,
     pub created_at_ms: i64,
+}
+
+/// 單筆交易記錄
+#[derive(Debug, Serialize)]
+pub struct TradeRecord {
+    /// 進場時間戳（毫秒）
+    pub entry_timestamp_ms: i64,
+    /// 出場時間戳（毫秒）
+    pub exit_timestamp_ms: i64,
+    /// 進場價格
+    pub entry_price: f64,
+    /// 出場價格
+    pub exit_price: f64,
+    /// 損益金額
+    pub net_pnl: f64,
+    /// 是否獲利
+    pub is_win: bool,
+}
+
+/// 回測指標
+#[derive(Debug, Serialize)]
+pub struct BacktestMetrics {
+    pub total_trades: i32,
+    pub winning_trades: i32,
+    pub losing_trades: i32,
+    pub win_rate: f64,
+    pub profit_factor: f64,
+    pub max_drawdown: f64,
+    pub sharpe_ratio: f64,
+    pub annual_return: f64,
+    /// 回測期間最長連續虧損筆數
+    pub max_consecutive_losses: u32,
+    /// 最長連虧區間的累計虧損金額（TWD，絕對值）
+    pub max_consecutive_loss_amount: f64,
+    /// 所有連虧區間的平均筆數（無連虧時為 0.0）
+    pub avg_consecutive_losses: f64,
+    /// 回測期間最長連續獲利筆數
+    pub max_consecutive_wins: u32,
 }
 
 // ── 引擎入口 ──────────────────────────────────────────────────────────────────
