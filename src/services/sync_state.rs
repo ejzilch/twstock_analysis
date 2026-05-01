@@ -7,11 +7,10 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
-use crate::api::handlers::admin_sync::{
-    GapProgress, SymbolProgress, SymbolSyncStatus, SyncStatus, SyncSummary,
-};
 use crate::constants::{REDIS_SYNC_KEY_PREFIX, REDIS_SYNC_TTL_SECS};
 use crate::domain::BridgeError;
+use crate::models::enums::{SymbolSyncStatus, SyncStatus};
+use crate::services::admin_sync::{GapProgress, SymbolProgress, SyncSummary};
 
 /// Redis 中儲存的完整同步狀態。
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -9,7 +9,6 @@
 ///   - 先查 DB 確認缺口，再打 FinMind API，不浪費請求配額
 ///   - 每批請求一個月的資料，控制單次請求大小
 ///   - 排程與手動同步共用 FinMindRateLimiter 實例
-use crate::api::handlers::sync_state::is_sync_cancel_requested;
 use crate::constants::{FINMIND_API_TOKEN_ENV, MANUAL_SYNC_BATCH_DAYS};
 use crate::data::db::{sync_log_update_counts, sync_log_update_status, BulkInsertBuffer};
 use crate::data::fetch::{fetch_range, fetch_stock_info_map};
@@ -19,6 +18,7 @@ use crate::data::models::current_timestamp_ms;
 use crate::data::symbol_sync::{get_finmind_earliest_ms, upsert_symbols, SymbolSyncData};
 use crate::domain::BridgeError;
 use crate::models::enums::{DataSource, Exchange, Interval};
+use crate::services::sync_state::is_sync_cancel_requested;
 use chrono::{Duration, NaiveDate, Utc};
 use redis::aio::MultiplexedConnection;
 use reqwest::Client;

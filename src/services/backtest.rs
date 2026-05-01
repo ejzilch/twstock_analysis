@@ -29,10 +29,7 @@ pub struct BacktestService;
 
 impl BacktestService {
     /// 執行完整回測流程。
-    pub async fn run(
-        state: &AppState,
-        params: &BacktestParams,
-    ) -> Result<BacktestOutput, anyhow::Error> {
+    pub async fn run(state: &AppState, params: &BacktestParams) -> anyhow::Result<BacktestOutput> {
         // ── Step 1: 參數驗證 ──────────────────────────────────────────────────
         Self::validate_request(params)?;
 
@@ -57,20 +54,6 @@ impl BacktestService {
 
         let output = engine_run(&input).map_err(anyhow::Error::msg)?;
 
-        // ── Step 4: 組裝 Response ─────────────────────────────────────────────
-        // Ok(BacktestResponse {
-        //     backtest_id: format!("bt-{}", uuid::Uuid::new_v4()),
-        //     symbol: params.symbol.clone(),
-        //     strategy_name: params.strategy_name.clone(),
-        //     from_ms: params.from_ms,
-        //     to_ms: params.to_ms,
-        //     initial_capital: params.initial_capital,
-        //     final_capital: output.final_capital,
-        //     exit_filter_pct: output.exit_filter_pct,
-        //     trades: output.trades,
-        //     metrics: output.metrics,
-        //     created_at_ms: output.created_at_ms,
-        // })
         Ok(output)
     }
 

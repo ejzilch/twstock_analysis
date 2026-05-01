@@ -1,27 +1,25 @@
-pub mod candle;
 pub mod handlers;
 pub mod middleware;
 pub mod models;
-pub mod signal;
 
 use crate::api::{
-    candle::handler::candles_handler,
     handlers::{
         admin_sync::{
             cancel_manual_sync, get_rate_limit_info, get_sync_status, get_sync_status_by_id,
             trigger_manual_sync,
         },
         backtest::backtest_handler,
+        candle::candles_handler,
         health::{health_handler, integrity_handler},
         indicators::compute_indicators_handler,
         predict::predict_handler,
+        signal::signals_handler,
         symbols::symbols_handler,
     },
     middleware::{
         auth::auth_middleware,
         rate_limit::{rate_limit_middleware, RateLimiterState},
     },
-    signal::handler::signals_handler,
 };
 use crate::app_state::AppState;
 use axum::{

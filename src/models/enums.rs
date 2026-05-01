@@ -120,6 +120,118 @@ impl fmt::Display for SignalType {
     }
 }
 
+/// K 線資料來源
+///
+/// 用於 GET /api/v1/candles/{symbol} response 的 source 欄位，
+/// 標示本次資料是從資料庫查詢還是從 Redis 快取取得。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FetchSource {
+    Database,
+    Cache,
+}
+
+impl std::fmt::Display for FetchSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FetchSource::Database => write!(f, "database"),
+            FetchSource::Cache => write!(f, "cache"),
+        }
+    }
+}
+
+/// 信號來源
+///
+/// 標示交易信號由何處產生，前端依此決定顯示方式。
+/// serde snake_case 對應 API_CONTRACT.md 的 source 欄位格式。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignalSource {
+    /// Python AI 模型集成預測，正常狀態
+    AiEnsemble,
+    /// 技術指標 fallback（AI 不可用時）
+    TechnicalOnly,
+    /// 人工干預信號
+    ManualOverride,
+}
+
+/// 信號可靠性等級
+///
+/// 標示 AI 預測或技術指標信號的可信度。
+/// 前端依此決定 reliability badge 的顯示顏色（見 FRONTEND_SPEC.md）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReliabilityLevel {
+    /// AI 正常，confidence > 0.7
+    High,
+    /// AI 正常，confidence 0.5 ~ 0.7
+    Medium,
+    /// AI 超時 fallback，或技術指標強度弱
+    Low,
+    /// 無法取得任何信號
+    Unknown,
+}
+
+impl ReliabilityLevel {
+    /// 依 AI confidence 值計算可靠性等級
+    pub fn from_confidence(confidence: f64) -> Self {
+        if confidence > 0.7 {
+            ReliabilityLevel::High
+        } else if confidence >= 0.5 {
+            ReliabilityLevel::Medium
+        } else {
+            ReliabilityLevel::Low
+        }
+    }
+}
+
+/// 同步模式
+///
+/// 用於 GET /api/v1//admin/sync response 的 mode 欄位，
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SyncMode {
+    All,
+    Partial,
+}
+
+/// 同步任務狀態
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncStatus {
+    Running,
+    RateLimitWaiting,
+    Completed,
+    Failed,
+}
+
+impl SyncStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SyncStatus::Running => "running",
+            SyncStatus::RateLimitWaiting => "rate_limit_waiting",
+            SyncStatus::Completed => "completed",
+            SyncStatus::Failed => "failed",
+        }
+    }
+
+    /// 是否仍在進行中（供前端判斷是否繼續輪詢）
+    pub fn is_in_progress(&self) -> bool {
+        matches!(self, SyncStatus::Running | SyncStatus::RateLimitWaiting)
+    }
+}
+
+/// 單一股票的同步狀態
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SymbolSyncStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Skipped,
+}
+
 // ── 單元測試 ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -187,5 +299,40 @@ mod tests {
     fn test_signal_type_serde() {
         let json = serde_json::to_string(&SignalType::Buy).unwrap();
         assert_eq!(json, "\"BUY\"");
+    }
+
+    #[test]
+    fn test_fetch_source_display() {
+        assert_eq!(FetchSource::Database.to_string(), "database");
+        assert_eq!(FetchSource::Cache.to_string(), "cache");
+    }
+
+    #[test]
+    fn test_reliability_from_confidence_boundaries() {
+        assert_eq!(
+            ReliabilityLevel::from_confidence(0.71),
+            ReliabilityLevel::High
+        );
+        assert_eq!(
+            ReliabilityLevel::from_confidence(0.70),
+            ReliabilityLevel::Medium
+        );
+        assert_eq!(
+            ReliabilityLevel::from_confidence(0.50),
+            ReliabilityLevel::Medium
+        );
+        assert_eq!(
+            ReliabilityLevel::from_confidence(0.49),
+            ReliabilityLevel::Low
+        );
+    }
+
+    #[test]
+    fn test_signal_source_serde_snake_case() {
+        let json = serde_json::to_string(&SignalSource::AiEnsemble).unwrap();
+        assert_eq!(json, "\"ai_ensemble\"");
+
+        let json = serde_json::to_string(&SignalSource::TechnicalOnly).unwrap();
+        assert_eq!(json, "\"technical_only\"");
     }
 }

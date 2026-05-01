@@ -8,16 +8,35 @@
 /// 不依賴 AppState、HTTP、DB、Redis。
 /// 所有副作用（AI 呼叫、Redis 查詢）由 SignalService 負責。
 use crate::ai_client::client::PredictResponse;
-use crate::api::models::enums::{ReliabilityLevel, SignalSource};
-use crate::api::signal::dto::response::TradeSignalResponse;
-use crate::models::enums::SignalType;
+use crate::models::enums::{ReliabilityLevel, SignalSource, SignalType};
+use serde::Serialize;
 use std::collections::HashMap;
 use uuid::Uuid;
+
+/// aggregator 的 model
+#[derive(Debug, Clone, Serialize)]
+pub struct TradeSignal {
+    pub id: String,
+    pub timestamp_ms: i64,
+    /// "BUY" / "SELL"
+    pub signal_type: SignalType,
+    pub confidence: f64,
+    pub entry_price: f64,
+    pub target_price: f64,
+    pub stop_loss: f64,
+    pub reason: String,
+    /// AiEnsemble / TechnicalOnly / ManualOverride,
+    pub source: SignalSource,
+    /// High / Medium / Low / Unknown
+    pub reliability: ReliabilityLevel,
+    /// AI 降級時的原因，如 "AI_SERVICE_TIMEOUT"
+    pub fallback_reason: Option<String>,
+}
 
 // ── AI 信號建構 ───────────────────────────────────────────────────────────────
 
 /// 從 AI 預測結果建構交易信號。
-pub fn build_ai_signal(prediction: &PredictResponse, timestamp_ms: i64) -> TradeSignalResponse {
+pub fn build_ai_signal(prediction: &PredictResponse, timestamp_ms: i64) -> TradeSignal {
     let signal_type = if prediction.up_probability > prediction.down_probability {
         SignalType::Buy
     } else {
@@ -34,7 +53,7 @@ pub fn build_ai_signal(prediction: &PredictResponse, timestamp_ms: i64) -> Trade
         prediction.model_version,
     );
 
-    TradeSignalResponse {
+    TradeSignal {
         id: format!("sig-{}", Uuid::new_v4()),
         timestamp_ms,
         signal_type,
@@ -59,7 +78,7 @@ pub fn build_technical_fallback_signal(
     indicators: &HashMap<String, f64>,
     fallback_reason: &str,
     timestamp_ms: i64,
-) -> TradeSignalResponse {
+) -> TradeSignal {
     let rsi = indicators.get("rsi").copied().unwrap_or(50.0);
 
     let (signal_type, confidence) = if rsi < 30.0 {
@@ -70,7 +89,7 @@ pub fn build_technical_fallback_signal(
         (SignalType::Buy, 0.3)
     };
 
-    TradeSignalResponse {
+    TradeSignal {
         id: format!("sig-{}", Uuid::new_v4()),
         timestamp_ms,
         signal_type,
