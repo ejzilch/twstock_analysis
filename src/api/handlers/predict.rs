@@ -2,15 +2,16 @@
 ///
 /// 直接呼叫 AI 服務，不做降級（降級邏輯在 signals handler / SignalService）。
 /// AI 超時或不可用時回傳 503 / 504，由呼叫方決定如何處理。
+///
+/// Timeout 由 AiServiceClient 內部的 HTTP client 統一管理（AI_SERVICE_TIMEOUT_SECS），
+/// handler 不再重複包裝，避免雙層 timeout 造成行為不一致。
 use crate::ai_client::client::PredictRequest;
 use crate::api::middleware::ApiError;
 use crate::app_state::AppState;
-use crate::constants::AI_SERVICE_TIMEOUT_SECS;
 use crate::domain::BridgeError;
 use axum::{extract::State, Json};
 use serde::Deserialize;
-use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::time::timeout;
+use std::{collections::HashMap, sync::Arc};
 
 #[derive(Debug, Deserialize)]
 pub struct PredictApiRequest {
@@ -32,27 +33,23 @@ pub async fn predict_handler(
         lookback_hours: request.lookback_hours,
     };
 
-    let result = timeout(
-        Duration::from_secs(AI_SERVICE_TIMEOUT_SECS),
-        state.ai_client.predict(&predict_request),
-    )
-    .await;
-
-    match result {
-        Ok(Ok(p)) => Ok(Json(serde_json::json!({
-            "symbol":           p.symbol,
-            "up_probability":   p.up_probability,
-            "down_probability": p.down_probability,
-            "confidence_score": p.confidence_score,
-            "model_version":    p.model_version,
-            "inference_time_ms":p.inference_time_ms,
-            "computed_at_ms":   p.computed_at_ms,
+    match state.ai_client.predict(&predict_request).await {
+        Ok(p) => Ok(Json(serde_json::json!({
+            "symbol":            p.symbol,
+            "up_probability":    p.up_probability,
+            "down_probability":  p.down_probability,
+            "confidence_score":  p.confidence_score,
+            "model_version":     p.model_version,
+            "inference_time_ms": p.inference_time_ms,
+            "computed_at_ms":    p.computed_at_ms,
         }))),
-        Ok(Err(BridgeError::PythonTimeout { .. })) | Err(_) => {
+
+        Err(BridgeError::PythonTimeout { .. }) => {
             tracing::warn!(symbol = %request.symbol, "AI service timed out in predict handler");
             Err(ApiError::AiServiceTimeout)
         }
-        Ok(Err(e)) => {
+
+        Err(e) => {
             tracing::error!(symbol = %request.symbol, error = %e, "AI service error in predict handler");
             Err(ApiError::AiServiceUnavailable)
         }
