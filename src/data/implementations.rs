@@ -7,7 +7,7 @@ use crate::domain::BridgeError;
 use async_trait::async_trait;
 use redis::aio::MultiplexedConnection;
 use sqlx::PgPool;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 // ── PostgresDbWriter ──────────────────────────────────────────────────────────
 
@@ -116,9 +116,8 @@ impl RedisInvalidator {
     }
 }
 
-#[async_trait]
 impl CacheInvalidator for RedisInvalidator {
-    async fn invalidate(&mut self, symbols: &[String]) {
+    fn invalidate(&mut self, symbols: &[String]) {
         let keys: Vec<String> = symbols
             .iter()
             .flat_map(|s| {
@@ -130,17 +129,16 @@ impl CacheInvalidator for RedisInvalidator {
             })
             .collect();
 
-        // UNLINK 為非同步刪除，不阻塞 Redis
-        if let Err(e) = redis::cmd("UNLINK")
-            .arg(&keys)
-            .query_async::<()>(&mut self.conn)
-            .await
-        {
-            warn!(
-                error   = %e,
-                symbols = ?symbols,
-                "Redis UNLINK failed after candle insert; relying on TTL expiry"
-            );
-        }
+        // 用 tokio::spawn 避免在同步函數裡 block
+        let mut conn = self.conn.clone();
+        tokio::spawn(async move {
+            if let Err(e) = redis::cmd("UNLINK")
+                .arg(&keys)
+                .query_async::<()>(&mut conn)
+                .await
+            {
+                tracing::warn!(error = %e, "Redis UNLINK failed; relying on TTL expiry");
+            }
+        });
     }
 }

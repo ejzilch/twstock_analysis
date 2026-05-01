@@ -83,6 +83,7 @@ async fn main() -> anyhow::Result<()> {
         ai_client: ai_client.clone(),
         rate_limiter: finmind_rate_limiter,
         http_client, // 傳入剛剛建立的 http_client
+        bulk_insert_buffer: bulk_insert_buffer.clone(),
     });
 
     // 組裝 Router
@@ -113,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 步驟 3: Flush BulkInsertBuffer 剩餘資料
     {
-        let mut buffer = bulk_insert_buffer.lock().await;
+        let mut buffer = app_state.bulk_insert_buffer.lock().await;
         let mut redis_conn = app_state.cache_invalidator()?;
         if let Err(e) = buffer
             .flush_and_close(&app_state.db_writer(), &mut redis_conn)

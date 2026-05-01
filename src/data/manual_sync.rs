@@ -267,8 +267,8 @@ pub async fn fetch_and_insert_gap(
     let mut total_failed = 0i32;
 
     // 紀錄這個缺口開始前，Buffer 內的狀態基準線
-    let initial_inserted = buffer.total_inserted;
-    let initial_skipped = buffer.total_skipped;
+    let initial_inserted = buffer.total_inserted();
+    let initial_skipped = buffer.total_skipped();
 
     info!(
         sync_id    = %sync_id,
@@ -367,8 +367,8 @@ pub async fn fetch_and_insert_gap(
     buffer.flush(&writer, &mut invalidator).await?;
 
     // 計算這個缺口實際寫入與跳過的精確數字
-    let actual_inserted = buffer.total_inserted - initial_inserted;
-    let actual_skipped = buffer.total_skipped - initial_skipped;
+    let actual_inserted = buffer.total_inserted() - initial_inserted;
+    let actual_skipped = buffer.total_skipped() - initial_skipped;
 
     // 統一在這個缺口任務完成時，更新 sync_log
     if actual_inserted > 0 || actual_skipped > 0 {
@@ -395,11 +395,12 @@ pub async fn run_manual_sync(
     sync_id: String,
     symbols: Vec<String>,
     scope: SyncScope,
+    buffer: Arc<tokio::sync::Mutex<BulkInsertBuffer>>,
 ) {
     info!(sync_id = %sync_id, symbols = ?symbols, "Manual sync started");
 
     // 建立共用的 BulkInsertBuffer 和 Redis 連線
-    let mut buffer = BulkInsertBuffer::new();
+    let mut buffer = buffer.lock().await;
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1".into());
     let redis_client = match redis::Client::open(redis_url) {
         Ok(c) => c,

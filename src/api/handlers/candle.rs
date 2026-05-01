@@ -114,7 +114,7 @@ mod tests {
             indicators: None,
             cursor: None,
         };
-        assert_eq!(params.interval(), Interval::OneHour);
+        assert_eq!(params.interval(), Interval::OneDay);
     }
 
     #[test]
