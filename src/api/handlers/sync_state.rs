@@ -7,7 +7,7 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
-use crate::api::models::admin_sync::{
+use crate::api::handlers::admin_sync::{
     GapProgress, SymbolProgress, SymbolSyncStatus, SyncStatus, SyncSummary,
 };
 use crate::constants::{REDIS_SYNC_KEY_PREFIX, REDIS_SYNC_TTL_SECS};

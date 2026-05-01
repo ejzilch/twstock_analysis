@@ -6,5 +6,7 @@
 ///   - 組裝 response
 ///
 /// Handler 只做 parse → call service → return response，不含任何業務邏輯。
+pub mod admin_sync;
 pub mod backtest;
+pub mod candle;
 pub mod signal;

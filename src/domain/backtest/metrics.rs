@@ -79,7 +79,7 @@ pub fn compute_annualized_return(initial: f64, final_capital: f64, trading_days:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::backtest::dto::types::RISK_FREE_ANNUAL;
+    use crate::domain::backtest::constants::RISK_FREE_ANNUAL;
 
     #[test]
     fn test_max_drawdown_non_zero() {
