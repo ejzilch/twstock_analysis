@@ -14,3 +14,9 @@ pub mod manual_sync;
 pub mod models;
 pub mod symbol_sync;
 pub mod traits;
+
+// 補上這兩個
+#[cfg(test)]
+mod db_tests;
+#[cfg(test)]
+pub mod mocks;

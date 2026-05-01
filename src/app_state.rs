@@ -1,3 +1,4 @@
+use crate::data::db::BulkInsertBuffer;
 use crate::data::implementations::{PostgresDbWriter, RedisInvalidator};
 use crate::AiServiceClient;
 use crate::FinMindRateLimiter;
@@ -5,6 +6,7 @@ use redis::aio::MultiplexedConnection;
 use reqwest::Client;
 use sqlx::PgPool;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Debug)]
 pub struct AppState {
@@ -13,6 +15,7 @@ pub struct AppState {
     pub ai_client: AiServiceClient,
     pub rate_limiter: Arc<FinMindRateLimiter>,
     pub http_client: Client,
+    pub bulk_insert_buffer: Arc<Mutex<BulkInsertBuffer>>,
 }
 
 impl AppState {

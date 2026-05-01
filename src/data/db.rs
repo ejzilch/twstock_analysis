@@ -27,13 +27,30 @@ use tracing::info;
 ///           或距上次刷入超過 BULK_INSERT_MAX_WAIT_MS ms，
 ///           擇一觸發 flush。
 pub struct BulkInsertBuffer {
-    buffer: Vec<RawCandle>,
-    last_flush_at: Instant,
-    pub total_inserted: i32,
-    pub total_skipped: i32,
+    pub(crate) buffer: Vec<RawCandle>,
+    pub(crate) last_flush_at: Instant,
+    total_inserted: i32,
+    total_skipped: i32,
+}
+
+impl std::fmt::Debug for BulkInsertBuffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BulkInsertBuffer")
+            .field("buffer_len", &self.buffer.len())
+            .field("total_inserted", &self.total_inserted)
+            .field("total_skipped", &self.total_skipped)
+            .finish()
+    }
 }
 
 impl BulkInsertBuffer {
+    pub fn total_inserted(&self) -> i32 {
+        self.total_inserted
+    }
+
+    pub fn total_skipped(&self) -> i32 {
+        self.total_skipped
+    }
     pub fn new() -> Self {
         Self {
             buffer: Vec::with_capacity(BULK_INSERT_MAX_BATCH_SIZE),

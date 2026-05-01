@@ -1,3 +1,6 @@
+use crate::app_state::AppState;
+use crate::constants::{FINMIND_RATE_LIMIT_BUFFER, FINMIND_RATE_LIMIT_PER_HOUR};
+use crate::data::db::{sync_log_create, SyncLogEntry};
 /// SyncService — 手動同步業務流程協調者（Service layer）
 ///
 /// 職責：
@@ -8,6 +11,12 @@
 ///   5. 組裝 StartSyncResult
 ///
 /// admin_sync handler 只做 parse → call service → return response。
+use crate::data::fetch_rate_limiter::FinMindRateLimiter;
+use crate::data::manual_sync::{run_manual_sync, SyncScope};
+use crate::data::models::current_timestamp_ms;
+use crate::domain::BridgeError;
+use crate::models::enums::{SymbolSyncStatus, SyncMode, SyncStatus};
+use crate::BulkInsertBuffer;
 use chrono::{Local, Months, NaiveDate};
 use redis::aio::MultiplexedConnection;
 use reqwest::Client;
@@ -15,15 +24,6 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::{error, info, warn};
-
-use crate::app_state::AppState;
-use crate::constants::{FINMIND_RATE_LIMIT_BUFFER, FINMIND_RATE_LIMIT_PER_HOUR};
-use crate::data::db::{sync_log_create, SyncLogEntry};
-use crate::data::fetch_rate_limiter::FinMindRateLimiter;
-use crate::data::manual_sync::{run_manual_sync, SyncScope};
-use crate::data::models::current_timestamp_ms;
-use crate::domain::BridgeError;
-use crate::models::enums::{SymbolSyncStatus, SyncMode, SyncStatus};
 
 use super::sync_state::{find_running_sync, save_sync_state, SyncState};
 
@@ -178,6 +178,7 @@ impl SyncService {
             sync_id.clone(),
             symbols.clone(),
             scope,
+            state.bulk_insert_buffer.clone(),
         ));
 
         info!(
@@ -286,6 +287,7 @@ impl SyncService {
         sync_id: String,
         symbols: Vec<String>,
         scope: SyncScope,
+        buffer: Arc<tokio::sync::Mutex<BulkInsertBuffer>>,
     ) {
         run_manual_sync(
             db_pool.clone(),
@@ -294,6 +296,7 @@ impl SyncService {
             sync_id.clone(),
             symbols,
             scope,
+            buffer,
         )
         .await;
 
