@@ -5,8 +5,8 @@ pub mod models;
 use crate::api::{
     handlers::{
         admin_sync::{
-            cancel_manual_sync, get_rate_limit_info, get_sync_status, get_sync_status_by_id,
-            trigger_manual_sync,
+            cancel_manual_sync, get_daily_schedule, get_rate_limit_info, get_sync_status,
+            get_sync_status_by_id, trigger_manual_sync, update_daily_schedule,
         },
         backtest::backtest_handler,
         candle::candles_handler,
@@ -67,6 +67,10 @@ pub fn build_router(app_state: Arc<AppState>, rate_limiter: RateLimiterState) ->
         .route("/admin/sync/status", get(get_sync_status))
         .route("/admin/sync/rate-limit", get(get_rate_limit_info))
         .route("/admin/sync/status/:sync_id", get(get_sync_status_by_id))
+        .route(
+            "/admin/sync/schedule",
+            get(get_daily_schedule).post(update_daily_schedule),
+        )
         .layer(axum::middleware::from_fn(auth_middleware))
         .layer(axum::middleware::from_fn_with_state(
             rate_limiter,

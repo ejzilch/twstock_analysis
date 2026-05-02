@@ -92,7 +92,7 @@ impl FinMindRateLimiter {
     }
 
     /// 升級 ApiTier（付費後呼叫）。
-    /// 預留介面，實際切換邏輯由 Gemini 決定。
+    /// 預留介面，實際切換邏輯待定
     pub fn upgrade_tier(&mut self, new_tier: ApiTier) {
         self.config = RateLimitConfig::for_tier(new_tier);
         info!(tier = ?new_tier, "FinMind ApiTier upgraded");
