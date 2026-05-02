@@ -8,6 +8,7 @@
 
 ```bash
 # Rust
+cargo run
 cargo build --release
 cargo test
 cargo clippy -- -D warnings
@@ -19,6 +20,7 @@ mypy .
 black .
 
 # Frontend
+npm run dev
 npm run build && npm test && tsc --noEmit
 ```
 
@@ -27,26 +29,63 @@ npm run build && npm test && tsc --noEmit
 ## 我負責的模組 (Claude Code)
 
 ```
-src/core/mod.rs          BridgeError 定義
-src/core/indicators/     MA / RSI / MACD / Bollinger，Factory + DAG 拓撲排序
-src/core/strategy/       signal_aggregator.rs (oneshot channel，預留 broadcast)
-src/api/handlers/        candles / indicators / signals / health / symbols
-src/api/middleware/      auth (X-API-KEY) / rate_limit / error
-src/ai_client/           client.rs + serialization.rs (JSON / MsgPack 自動選擇)
+src/domain/              領域核心（純計算，零 I/O）
+  backtest/              回測引擎 + 財務指標
+  indicators/            技術指標（MA/RSI/MACD/Bollinger）
+  signal/                信號聚合（AI signal / technical fallback）
+  strategy/              交易策略（trend_follow/mean_reversion/breakout）
+
+src/services/            業務流程協調（Service layer）
+  admin_sync.rs          手動同步流程協調
+  backtest.rs            回測流程協調
+  candle.rs              K 線查詢與指標計算協調
+  signal.rs              信號產生流程協調
+  sync_state.rs          同步狀態 Redis 存取
+
+src/api/                 API 層
+  handlers/              薄 handler（parse → call service → return）
+  middleware/            auth / rate_limit / error
+  models/                request / response / enums
+
+src/data/                資料層
+  db.rs                  BulkInsertBuffer + sync_log CRUD
+  fetch.rs               FinMind API 呼叫
+  fetch_rate_limiter.rs  FinMind 限流器（async 等待機制）
+  manual_sync.rs         缺口偵測 + 分批補資料
+  symbol_sync.rs         Symbol 清單同步
+  implementations.rs     PostgresDbWriter + RedisInvalidator
+  traits.rs              DbWriter + CacheInvalidator traits
+
+src/ai_client/           Python AI Service 客戶端
+  client.rs              BridgeError 轉換
+  serialization.rs       JSON / MsgPack 自動選擇
+
+src/models/              領域模型
+  candle.rs              Candle / IndicatorValue / MacdValue
+  enums.rs               所有 enum（Interval/Exchange/SignalType 等）
+  indicators.rs          ComputeIndicatorsRequest/Response
+  symbol.rs              SymbolMeta
+
 src/main.rs              Graceful Shutdown
+src/app_state.rs         AppState 定義
+src/constants.rs         所有常數定義
 ```
 
-**不碰的模組：** `src/data/`（Gemini）、`ai_service/`（Codex）、`frontend/`（Codex）
+**不再負責的模組：** 無（已接手所有模組）
 
 ---
 
 ## 模組邊界速查
 
-| 模組 | 負責人 |
-|------|--------|
-| src/data/，RawCandle，Bulk Insert，FinMind 限流，Symbol 同步 | Gemini |
-| src/core/，src/api/，ai_client/，main.rs | Claude Code (我) |
-| ai_service/，frontend/ | Codex |
+| 模組 | 負責人 | 狀態 |
+|------|--------|------|
+| src/domain/（所有核心計算） | Claude Code | ✅ 完成 |
+| src/services/（業務協調） | Claude Code | ✅ 完成 |
+| src/api/（API 層） | Claude Code | ✅ 完成 |
+| src/data/（資料層） | Claude Code | ✅ 完成 |
+| src/ai_client/ | Claude Code | ✅ 完成 |
+| ai_service/（Python AI） | Codex | 🔄 進行中 |
+| frontend/ | Codex | 🔄 進行中 |
 
 **絕對禁止：** 在 handler 內直接寫 SQL / 機器學習邏輯 / 前端代碼
 
@@ -56,8 +95,7 @@ src/main.rs              Graceful Shutdown
 
 新功能開工前，必須確認：
 - [ ] EJ 已簽核 Spec
-- [ ] Gemini 已定義對應的 Rust struct
-- [ ] Mock server 已部署
+- [ ] Mock server 已部署（若前端需要）
 
 ---
 
@@ -76,7 +114,7 @@ src/main.rs              Graceful Shutdown
 - candles 超過 2000 根 → 回傳 `400 QUERY_RANGE_TOO_LARGE`，禁止截斷
 - 有限合法值欄位使用 enum，不用 String
   - 跨層共用（Interval, Exchange, SignalType）-> src/models/enums.rs
-  - API 層專用（HealthStatus, SignalSource, FetchSource）-> src/api/models/enums.rs
+  - API 層專用（HealthStatus, FetchSource）-> src/api/models/enums.rs
 - 錯誤碼字串引用 src/constants.rs 常數，不硬寫
 - 禁止魔法數字，具業務語義的數值一律引用 src/constants.rs
 - 判斷原則：數字需要 comment 才能理解就是魔法數字
@@ -107,7 +145,7 @@ src/main.rs              Graceful Shutdown
 
 1. Bulk INSERT 寫入 DB
 2. COMMIT 事務
-3. 統一 DEL affected symbols 的 redis keys
+3. 統一 UNLINK affected symbols 的 redis keys
 
 ---
 
@@ -126,6 +164,8 @@ src/main.rs              Graceful Shutdown
 | INVALID_INDICATOR_CONFIG | 400 |
 | SYMBOL_NOT_FOUND | 404 |
 | QUERY_RANGE_TOO_LARGE | 400 |
+| SYNC_ALREADY_RUNNING | 409 |
+| SYNC_NOT_FOUND | 404 |
 
 ---
 
@@ -139,6 +179,8 @@ src/main.rs              Graceful Shutdown
 - Graceful Shutdown 未依順序執行
 - 金融數值未用 checked 運算
 - God function / 單字元命名 / emoji 註解
+- 在程式碼中硬寫 API 錯誤碼字串
+- API 層使用 String 表示有限合法值
 
 ---
 
@@ -164,3 +206,6 @@ src/main.rs              Graceful Shutdown
 | 所有 API 端點格式、error envelope | docs/API_CONTRACT.md |
 | 角色職責邊界、技術風險規範 | docs/COLLAB_FRAMEWORK.md |
 | 部署順序、EJ 巡視、問題排查 | docs/DAILY_CHECKLIST.md |
+| 前端規格 | docs/FRONTEND_SPEC.md |
+| 手動同步規格 | docs/MANUAL_SYNC_SPEC.md |
+| 訓練標記定義 | docs/LABEL_DEFINITION_SPEC.md |
