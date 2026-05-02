@@ -5,6 +5,7 @@ import { CandleChart } from '@/src/components/charts/CandleChart'
 import { Card, LoadingSpinner, ErrorToast, Button } from '@/src/components/ui'
 import type { CandleItem, SignalItem, CandlesResponse, TradeRecord } from '@/src/types/api.types'
 import { IndicatorToggle } from '@/src/components/charts/IndicatorToggle'
+import { useChartSync } from '@/src/hooks'
 
 interface BacktestChartProps {
     symbol: string
@@ -55,7 +56,9 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
     const [hasMore, setHasMore] = useState(false)
     const [cursor, setCursor] = useState<string | null>(null)
     const [loadingMore, setLoadingMore] = useState(false)
-    const [visibleIndicators, setVisibleIndicators] = useState<Set<string>>(new Set())
+    const ALL_INDICATORS = new Set(['ma5', 'ma20', 'ma50', 'bollinger'])
+    const [visibleIndicators, setVisibleIndicators] = useState<Set<string>>(ALL_INDICATORS)
+    const chartSync = useChartSync()
 
     // Initial load
     useEffect(() => {
@@ -68,7 +71,7 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
         setSignals(tradesToSignals(trades))
 
         apiClient<CandlesResponse>(
-            `/api/v1/candles/${symbol}${buildQueryString({ from_ms, to_ms, interval: '1d', indicators: 'ma5,ma20,ma50,bollinger', })}`
+            `/api/v1/candles/${symbol}${buildQueryString({ from_ms, to_ms, interval: '1d', indicators: 'ma5,ma20,ma50,rsi,macd,bollinger', })}`
         )
             .then((candlesRes) => {
                 setCandles(candlesRes.candles)
@@ -86,7 +89,7 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
         setLoadingMore(true)
         try {
             const res = await apiClient<CandlesResponse>(
-                `/api/v1/candles/${symbol}${buildQueryString({ from_ms, to_ms, interval: '1d', cursor, indicators: 'ma5,ma20,ma50,bollinger', })}`
+                `/api/v1/candles/${symbol}${buildQueryString({ from_ms, to_ms, interval: '1d', cursor, indicators: 'ma5,ma20,ma50,rsi,macd,bollinger', })}`
             )
             setCandles((prev) => {
                 const merged = [...prev, ...res.candles]
@@ -142,6 +145,7 @@ export function BacktestChart({ symbol, strategyName, from_ms, to_ms, exitFilter
                 showVolume={false}
                 markerTextMode="signalOnly"
                 visibleIndicators={visibleIndicators}
+                sync={chartSync}
             />
 
             {hasMore && (

@@ -1,3 +1,5 @@
+use reqwest::header::Entry;
+
 use crate::domain::strategy::constants::{
     TF_MA_LONG, TF_RSI_OVERBOUGHT, TF_WEAK_SIGNAL_POSITION_RATIO,
 };
@@ -30,8 +32,6 @@ pub fn trend_follow_signal_strength(
     let ma5 = ma5_series[idx];
     let ma20 = ma20_series[idx];
     let ma50 = ma50_series[idx];
-    let ma5_prev = ma5_series[idx - 1];
-    let ma20_prev = ma20_series[idx - 1];
 
     if !ma5.is_finite() || !ma20.is_finite() || !ma50.is_finite() {
         return TrendSignalStrength::None;
@@ -42,7 +42,7 @@ pub fn trend_follow_signal_strength(
     }
 
     // 「剛上穿」= 今日 MA5 > MA20 且昨日 MA5 <= MA20
-    let just_crossed = ma5 > ma20 && ma5_prev <= ma20_prev;
+    let just_crossed = ma5 > ma20;
     if ma20 > ma50 && just_crossed {
         return TrendSignalStrength::Weak;
     }
@@ -84,16 +84,20 @@ pub fn trend_follow_should_exit(
     ma5_series: &[f64],
     ma20_series: &[f64],
     ma50_series: &[f64],
+    closes: &[f64],
     rsi_series: &[f64],
     idx: usize,
+    entry_idx: usize,
 ) -> bool {
-    if idx < 1 {
+    if idx < 1 || idx <= entry_idx {
         return false;
     }
 
     let ma5 = ma5_series[idx];
+    let ma5_prev = ma5_series[idx - 1];
     let ma20 = ma20_series[idx];
     let ma50 = ma50_series[idx];
+    let close = closes[idx];
     let rsi = rsi_series[idx];
     let rsi_prev = rsi_series[idx - 1];
 
@@ -101,15 +105,14 @@ pub fn trend_follow_should_exit(
         return false;
     }
 
-    // 條件一：MA5 跌破 MA20 且 MA20 也跌破 MA50（雙重確認趨勢結束）
-    if ma5 < ma20 && ma20 < ma50 {
-        return true;
-    }
+    // 條件一：動能轉弱（提前 exit）
+    let momentum_exit = ma5 < ma5_prev && close < ma5;
 
     // 條件二：RSI 過熱後轉弱
-    if rsi.is_finite() && rsi_prev.is_finite() && rsi > TF_RSI_OVERBOUGHT && rsi < rsi_prev {
-        return true;
-    }
+    let rsi_exit = rsi.is_finite() && rsi_prev.is_finite() && rsi > 75.0 && rsi < rsi_prev;
 
-    false
+    // 條件三：趨勢破壞（最後防線）
+    let trend_break = ma5 < ma20 && ma20 < ma50;
+
+    momentum_exit || rsi_exit || trend_break
 }
