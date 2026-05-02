@@ -25,7 +25,7 @@ pub struct CandlesQueryParams {
     pub interval: Option<Interval>,
     /// 逗號分隔的指標名稱，如 "ma20,rsi,macd"
     pub indicators: Option<String>,
-    /// 分頁游標
+    /// 分頁游標 (candles lazy loading 預留)
     pub cursor: Option<String>,
 }
 

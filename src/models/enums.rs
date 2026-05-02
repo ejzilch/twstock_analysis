@@ -287,6 +287,12 @@ mod tests {
     }
 
     #[test]
+    fn test_sync_status_as_str() {
+        assert_eq!(SyncStatus::Completed.as_str(), "completed");
+        assert_eq!(SyncStatus::Failed.as_str(), "failed");
+    }
+
+    #[test]
     fn test_signal_type_no_hold_variant() {
         // 確認 HOLD 不存在，避免日後誤加
         let buy = SignalType::Buy;

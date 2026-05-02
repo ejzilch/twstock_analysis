@@ -1,5 +1,3 @@
-use reqwest::header::Entry;
-
 use crate::domain::strategy::constants::{
     TF_MA_LONG, TF_RSI_OVERBOUGHT, TF_WEAK_SIGNAL_POSITION_RATIO,
 };
@@ -109,7 +107,8 @@ pub fn trend_follow_should_exit(
     let momentum_exit = ma5 < ma5_prev && close < ma5;
 
     // 條件二：RSI 過熱後轉弱
-    let rsi_exit = rsi.is_finite() && rsi_prev.is_finite() && rsi > 75.0 && rsi < rsi_prev;
+    let rsi_exit =
+        rsi.is_finite() && rsi_prev.is_finite() && rsi > TF_RSI_OVERBOUGHT && rsi < rsi_prev;
 
     // 條件三：趨勢破壞（最後防線）
     let trend_break = ma5 < ma20 && ma20 < ma50;
