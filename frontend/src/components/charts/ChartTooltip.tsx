@@ -138,7 +138,10 @@ export function CandleTooltip({
     const boll = data?.indicators?.['bollinger'] as
         | { upper: number; middle: number; lower: number }
         | undefined
-
+    const rsi = data?.indicators?.['rsi14'] as number | undefined
+    const macd = data?.indicators?.['macd'] as
+        | { macd_line: number; signal_line: number; histogram: number }
+        | undefined
     const hasMA = (show('ma5') && ma5 != null) || (show('ma20') && ma20 != null) || (show('ma50') && ma50 != null)
     const hasBoll = show('bollinger') && boll != null
 
@@ -189,6 +192,21 @@ export function CandleTooltip({
                     <Field label="BOLL 上軌" value={fmt(boll!.upper)} color={themedIndicatorColor.bollUpper} />
                     <Field label="BOLL 中軌" value={fmt(boll!.middle)} color={BASE_INDICATOR_COLORS.bollMid} />
                     <Field label="BOLL 下軌" value={fmt(boll!.lower)} color={themedIndicatorColor.bollLower} />
+                </>
+            )}
+
+            {/* RSI / MACD */}
+            {(rsi != null || macd != null) && (
+                <>
+                    <Divider />
+                    {rsi != null && <Field label="RSI14" value={fmt(rsi)} color={BASE_INDICATOR_COLORS.rsi} />}
+                    {macd != null && (
+                        <>
+                            <Field label="DIF" value={fmt(macd.macd_line)} color={themedIndicatorColor.macdLine} />
+                            <Field label="DEA" value={fmt(macd.signal_line)} color={themedIndicatorColor.signal} />
+                            <Field label="OSC" value={fmt(macd.histogram)} color={macd.histogram >= 0 ? themedIndicatorColor.histPos : themedIndicatorColor.histNeg} />
+                        </>
+                    )}
                 </>
             )}
         </AnchorPanel>

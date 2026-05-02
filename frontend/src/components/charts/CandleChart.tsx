@@ -245,35 +245,36 @@ export function CandleChart({
                 .filter((c) => c.indicators?.[key] != null && !isNaN(c.indicators[key] as number))
                 .map((c) => ({ time: (c.timestamp_ms / 1000) as Time, value: c.indicators?.[key] as number }))
 
-        s.ma5?.setData(show('ma5') ? toLineData('ma5') : [])
-        s.ma20?.setData(show('ma20') ? toLineData('ma20') : [])
-        s.ma50?.setData(show('ma50') ? toLineData('ma50') : [])
+        s.ma5?.setData(toLineData('ma5'))
+        s.ma20?.setData(toLineData('ma20'))
+        s.ma50?.setData(toLineData('ma50'))
+        s.ma5?.applyOptions({ visible: show('ma5') })
+        s.ma20?.applyOptions({ visible: show('ma20') })
+        s.ma50?.applyOptions({ visible: show('ma50') })
 
         // Bollinger
-        if (show('bollinger')) {
-            const bollCandles = candles.filter((c) => c.indicators?.['bollinger'] != null)
-            type Boll = {
-                upper: number;
-                middle: number;
-                lower: number
-            }
-            s.bollUpper?.setData(bollCandles.map((c) => ({
-                time: (c.timestamp_ms / 1000) as Time,
-                value: (c.indicators?.['bollinger'] as Boll).upper
-            })))
-            s.bollMid?.setData(bollCandles.map((c) => ({
-                time: (c.timestamp_ms / 1000) as Time,
-                value: (c.indicators?.['bollinger'] as Boll).middle
-            })))
-            s.bollLower?.setData(bollCandles.map((c) => ({
-                time: (c.timestamp_ms / 1000) as Time,
-                value: (c.indicators?.['bollinger'] as Boll).lower
-            })))
-        } else {
-            s.bollUpper?.setData([])
-            s.bollMid?.setData([])
-            s.bollLower?.setData([])
+        const bollCandles = candles.filter((c) => c.indicators?.['bollinger'] != null)
+        type Boll = {
+            upper: number;
+            middle: number;
+            lower: number
         }
+        s.bollUpper?.setData(bollCandles.map((c) => ({
+            time: (c.timestamp_ms / 1000) as Time,
+            value: (c.indicators?.['bollinger'] as Boll).upper
+        })))
+        s.bollMid?.setData(bollCandles.map((c) => ({
+            time: (c.timestamp_ms / 1000) as Time,
+            value: (c.indicators?.['bollinger'] as Boll).middle
+        })))
+        s.bollLower?.setData(bollCandles.map((c) => ({
+            time: (c.timestamp_ms / 1000) as Time,
+            value: (c.indicators?.['bollinger'] as Boll).lower
+        })))
+        const showBollinger = show('bollinger')
+        s.bollUpper?.applyOptions({ visible: showBollinger })
+        s.bollMid?.applyOptions({ visible: showBollinger })
+        s.bollLower?.applyOptions({ visible: showBollinger })
 
         // Volume
         s.volume?.setData(candles.map((c, idx) => {

@@ -145,6 +145,7 @@ pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
     let mut position_cost = 0.0_f64;
     let mut holding_days = 0_u32;
     let mut entry_timestamp_ms = 0_i64;
+    let mut entry_idx = 0_usize;
 
     // ── 統計計數器 ────────────────────────────────────────────────────────────
     let mut winning_trades = 0_i32;
@@ -194,12 +195,14 @@ pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
             &ma5_series,
             &ma20_series,
             &ma50_series,
+            &closes,
             &rsi_series,
             &boll_series,
             &macd_series,
             candles,
             should_hold,
             i,
+            entry_idx,
         );
 
         let signal_close = candles[i].close;
@@ -225,6 +228,7 @@ pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
 
         if should_hold && !in_position {
             entry_timestamp_ms = candles[i + 1].timestamp_ms;
+            entry_idx = i;
             let capital_deployed = equity * actual_position_fraction;
             let buy_fee = capital_deployed * COMMISSION_RATE;
             position_units = capital_deployed / exec_close;
@@ -450,28 +454,36 @@ fn resolve_exit_signal(
     ma20_series: &[f64],
     ma50_series: &[f64],
     rsi_series: &[f64],
+    closes: &[f64],
     boll_series: &[(f64, f64, f64)],
     macd_series: &[MacdValue],
     candles: &[CandleRow],
     should_hold: bool,
-    i: usize,
+    idx: usize,
+    entry_idx: usize,
 ) -> bool {
     match input.strategy_name.as_str() {
-        "trend_follow_v1" => {
-            trend_follow_should_exit(ma5_series, ma20_series, ma50_series, rsi_series, i)
-        }
+        "trend_follow_v1" => trend_follow_should_exit(
+            ma5_series,
+            ma20_series,
+            ma50_series,
+            closes,
+            rsi_series,
+            idx,
+            entry_idx,
+        ),
         "mean_reversion_v1" => {
-            let close = candles[i].close;
-            let (_, boll_middle, _) = boll_series[i];
-            mean_reversion_should_exit(close, ma50_series[i], boll_middle)
+            let close = candles[idx].close;
+            let (_, boll_middle, _) = boll_series[idx];
+            mean_reversion_should_exit(close, ma50_series[idx], boll_middle)
         }
         "breakout_v1" => {
-            let macd_curr = &macd_series[i];
+            let macd_curr = &macd_series[idx];
             if macd_curr.macd_line.is_nan() {
                 false
             } else {
-                let (boll_upper, _, _) = boll_series[i];
-                breakout_should_exit(candles[i].close, boll_upper, macd_curr.histogram)
+                let (boll_upper, _, _) = boll_series[idx];
+                breakout_should_exit(candles[idx].close, boll_upper, macd_curr.histogram)
             }
         }
         _ => !should_hold,
