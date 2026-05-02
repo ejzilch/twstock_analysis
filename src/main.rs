@@ -14,6 +14,7 @@ use crate::data::{
     db::BulkInsertBuffer,
     fetch_rate_limiter::{ApiTier, FinMindRateLimiter},
 };
+use crate::services::scheduler::run_daily_scheduler;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
@@ -85,6 +86,9 @@ async fn main() -> anyhow::Result<()> {
         http_client, // 傳入剛剛建立的 http_client
         bulk_insert_buffer: bulk_insert_buffer.clone(),
     });
+
+    // 啟動每日排程背景 task
+    tokio::spawn(run_daily_scheduler(app_state.clone()));
 
     // 組裝 Router
     let rate_limiter_state = new_rate_limiter_state();

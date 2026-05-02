@@ -255,6 +255,61 @@ pub async fn get_rate_limit_info(State(state): State<Arc<AppState>>) -> impl Int
         .into_response()
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DailyScheduleConfig {
+    pub enabled: bool,
+    pub time: String,
+}
+
+const SCHEDULE_KEY_ENABLED: &str = "daily_sync_enabled";
+const SCHEDULE_KEY_TIME: &str = "daily_sync_time";
+
+pub async fn get_daily_schedule(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let mut redis = state.redis_client.clone();
+    let enabled: Option<String> = redis::cmd("GET")
+        .arg(SCHEDULE_KEY_ENABLED)
+        .query_async(&mut redis)
+        .await
+        .ok()
+        .flatten();
+    let time: Option<String> = redis::cmd("GET")
+        .arg(SCHEDULE_KEY_TIME)
+        .query_async(&mut redis)
+        .await
+        .ok()
+        .flatten();
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "enabled": enabled.as_deref() == Some("true"),
+            "time": time.unwrap_or_else(|| "02:00".to_string())
+        })),
+    )
+        .into_response()
+}
+
+pub async fn update_daily_schedule(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<DailyScheduleConfig>,
+) -> impl IntoResponse {
+    let mut redis = state.redis_client.clone();
+    let _: redis::RedisResult<()> = redis::cmd("SET")
+        .arg(SCHEDULE_KEY_ENABLED)
+        .arg(if body.enabled { "true" } else { "false" })
+        .query_async(&mut redis)
+        .await;
+    let _: redis::RedisResult<()> = redis::cmd("SET")
+        .arg(SCHEDULE_KEY_TIME)
+        .arg(&body.time)
+        .query_async(&mut redis)
+        .await;
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({"enabled": body.enabled, "time": body.time})),
+    )
+        .into_response()
+}
+
 // ── 共用：組裝 SyncStatusResponse ────────────────────────────────────────────
 
 async fn build_status_response(
