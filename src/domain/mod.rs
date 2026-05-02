@@ -75,13 +75,6 @@ impl BridgeError {
         }
     }
 
-    pub fn db(context: impl Into<String>) -> Self {
-        Self::DatabaseError {
-            context: context.into(),
-            source: None,
-        }
-    }
-
     pub fn from_cache(
         context: impl Into<String>,
         e: impl std::error::Error + Send + Sync + 'static,

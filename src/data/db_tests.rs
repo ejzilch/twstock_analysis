@@ -240,7 +240,7 @@ mod integration_tests {
 
     #[tokio::test]
     async fn test_cache_invalidation_called_after_db_write() {
-        /// 驗證快取失效一定在 DB 寫入成功後才執行
+        // 驗證快取失效一定在 DB 寫入成功後才執行
         let mut buf = BulkInsertBuffer::new();
         let writer = InMemoryDbWriter::new();
         let mut spy = SpyCacheInvalidator::default();

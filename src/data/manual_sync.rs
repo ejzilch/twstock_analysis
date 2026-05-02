@@ -18,7 +18,7 @@ use crate::data::implementations::{PostgresDbWriter, RedisInvalidator};
 use crate::data::models::current_timestamp_ms;
 use crate::data::symbol_sync::{get_finmind_earliest_ms, upsert_symbols, SymbolSyncData};
 use crate::domain::BridgeError;
-use crate::models::enums::{DataSource, Exchange, Interval};
+use crate::models::enums::{DataSource, Exchange, Interval, SyncStatus};
 use crate::services::sync_state::is_sync_cancel_requested;
 use chrono::{Duration, NaiveDate, Utc};
 use redis::aio::MultiplexedConnection;
@@ -392,9 +392,13 @@ pub async fn run_manual_sync(
         Ok(g) => g,
         Err(e) => {
             error!(error = %e, sync_id = %sync_id, "detect_gaps failed");
-            let _ =
-                sync_log_update_status(&db_pool, &sync_id, "failed", Some(current_timestamp_ms()))
-                    .await;
+            let _ = sync_log_update_status(
+                &db_pool,
+                &sync_id,
+                SyncStatus::Failed.as_str(),
+                Some(current_timestamp_ms()),
+            )
+            .await;
             return;
         }
     };
@@ -462,9 +466,9 @@ pub async fn run_manual_sync(
     // Step 3: 依執行結果標記最終狀態
     let completed_at = current_timestamp_ms();
     let final_status = if has_gap_error || total_failed_batches > 0 {
-        "failed"
+        SyncStatus::Failed.as_str()
     } else {
-        "completed"
+        SyncStatus::Completed.as_str()
     };
 
     let _ = sync_log_update_status(&db_pool, &sync_id, final_status, Some(completed_at)).await;

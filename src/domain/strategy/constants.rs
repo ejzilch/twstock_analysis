@@ -1,8 +1,5 @@
 // ── strategy 共用 ──────────────────────────────────────────────────────────────────────
 
-/// 強制停利
-pub const TAKE_PROFIT_RATIO: f64 = 0.3;
-
 /// 連續虧損統計：損益序列為空時的預設平均值
 pub const DEFAULT_AVG_CONSECUTIVE_LOSSES: f64 = 0.0;
 
