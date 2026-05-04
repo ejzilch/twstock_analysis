@@ -34,6 +34,7 @@ pub struct BacktestRequest {
     /// 傳 0 則等同停用（任何時候都可出場）。
     #[serde(default)]
     pub min_holding_days: Option<u32>,
+    pub take_profit_boll_pct: Option<f64>,
 }
 
 impl From<&BacktestRequest> for BacktestParams {
@@ -47,6 +48,7 @@ impl From<&BacktestRequest> for BacktestParams {
             position_size_percent: request.position_size_percent,
             exit_filter_pct: request.exit_filter_pct,
             min_holding_days: request.min_holding_days,
+            take_profit_boll_pct: request.take_profit_boll_pct,
         }
     }
 }

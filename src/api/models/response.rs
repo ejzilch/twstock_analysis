@@ -112,14 +112,6 @@ pub struct AiServiceCheck {
     pub last_response_ms: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct DataSourceCheck {
-    pub primary: String,
-    pub status: String,
-    pub fallback: Option<String>,
-    pub rate_limit_remaining_pct: f64,
-}
-
 // ── 單元測試 ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

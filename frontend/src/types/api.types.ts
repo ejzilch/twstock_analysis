@@ -199,4 +199,12 @@ export interface AppState {
     setSelectedInterval: (interval: string) => void
     toggleEcoMode: () => void
     setApiKey: (key: string) => void
+
+    // 排程（不 persist）
+    scheduleEnabled: boolean
+    scheduleTime: string
+    scheduleLoaded: boolean
+    setSchedule: (enabled: boolean, time: string) => void
+    setScheduleEnabled: (enabled: boolean) => void
+    setScheduleTime: (time: string) => void
 }

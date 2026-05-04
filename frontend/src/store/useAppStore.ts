@@ -7,6 +7,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { AppState } from '@/src/types/api.types'
 
+
+
 export const useAppStore = create<AppState>()(
     persist(
         (set) => ({
@@ -26,6 +28,16 @@ export const useAppStore = create<AppState>()(
             },
             colorMode: 'TW',
             toggleColorMode: () => set((s) => ({ colorMode: s.colorMode === 'TW' ? 'US' : 'TW' })),
+
+            // ── 排程狀態（不 persist，後端為 source of truth）──
+            scheduleEnabled: false,
+            scheduleTime: '02:00',
+            scheduleLoaded: false,
+
+            setSchedule: (enabled, time) =>
+                set({ scheduleEnabled: enabled, scheduleTime: time, scheduleLoaded: true }),
+            setScheduleEnabled: (enabled) => set({ scheduleEnabled: enabled }),
+            setScheduleTime: (time) => set({ scheduleTime: time }),
         }),
         {
             name: 'ai-bridge-ui',

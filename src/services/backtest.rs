@@ -23,6 +23,7 @@ pub struct BacktestParams {
     pub position_size_percent: f64,
     pub exit_filter_pct: Option<f64>,
     pub min_holding_days: Option<u32>,
+    pub take_profit_boll_pct: Option<f64>,
 }
 
 pub struct BacktestService;
@@ -50,6 +51,7 @@ impl BacktestService {
             position_size_percent: params.position_size_percent,
             exit_filter_pct: params.exit_filter_pct,
             min_holding_days: params.min_holding_days,
+            take_profit_boll_pct: params.take_profit_boll_pct,
         };
 
         let output = engine_run(&input).map_err(anyhow::Error::msg)?;

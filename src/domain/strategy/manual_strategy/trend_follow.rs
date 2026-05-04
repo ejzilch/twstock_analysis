@@ -13,10 +13,34 @@ pub enum TrendSignalStrength {
     None,
 }
 
-/// 判斷進場強度
-/// Strong  = MA5 > MA20 > MA50（三均線順勢排列）
-/// Weak    = MA20 > MA50 且 MA5 剛上穿 MA20（補訊號）
-/// None    = 不進場
+/// 判斷趨勢跟隨策略的進場強度。
+///
+/// # 策略邏輯
+///
+/// ## Strong（強勢進場，全倉）
+/// 條件：`MA5 > MA20 > MA50`
+///
+/// 三條均線呈多頭排列，短中長期趨勢一致向上。
+/// 這是最理想的進場時機，代表趨勢已充分確立。
+///
+/// ## Weak（弱勢進場，半倉）
+/// 條件：`MA20 > MA50` 且 `MA5 剛上穿 MA20`（今日穿越，昨日仍在下方）
+///
+/// 中長期趨勢向上（MA20 > MA50），但短期均線剛剛突破中期均線。
+/// 這是趨勢初期的補捉訊號，代表動能開始轉強但尚未完全確立，
+/// 因此採半倉進場以控制風險。
+/// 注意：「剛上穿」定義為今日 MA5 > MA20 且昨日 MA5 <= MA20，
+/// 避免趨勢持續期間重複觸發進場訊號。
+///
+/// ## None（不進場）
+/// 以上條件均不符合，或資料不足（idx < TF_MA_LONG）、均線值無效（NaN/Inf）。
+///
+/// # 參數
+/// - `ma5_series`  / `ma20_series` / `ma50_series`：各均線完整序列
+/// - `idx`：當前 K 線索引
+///
+/// # 回傳
+/// [`TrendSignalStrength`]：`Strong` / `Weak` / `None`
 pub fn trend_follow_signal_strength(
     ma5_series: &[f64],
     ma20_series: &[f64],
@@ -35,14 +59,23 @@ pub fn trend_follow_signal_strength(
         return TrendSignalStrength::None;
     }
 
+    // Strong：三均線順勢排列
     if ma5 > ma20 && ma20 > ma50 {
         return TrendSignalStrength::Strong;
     }
 
-    // 「剛上穿」= 今日 MA5 > MA20 且昨日 MA5 <= MA20
-    let just_crossed = ma5 > ma20;
-    if ma20 > ma50 && just_crossed {
-        return TrendSignalStrength::Weak;
+    // Weak：MA5 剛上穿 MA20（今天穿越，昨天還在下方），且 MA20 > MA50 趨勢向上
+    if idx >= 1 {
+        let ma5_prev = ma5_series[idx - 1];
+        let ma20_prev = ma20_series[idx - 1];
+
+        if ma20 > ma50
+            && ma5 > ma20          // 今天 MA5 在 MA20 上方
+            && ma5_prev <= ma20_prev
+        // 昨天 MA5 還在 MA20 下方或相等
+        {
+            return TrendSignalStrength::Weak;
+        }
     }
 
     TrendSignalStrength::None
