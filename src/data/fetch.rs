@@ -7,13 +7,13 @@
 /// 本次新增：fetch_range()，供 manual_sync.rs 的缺口補齊使用。
 /// 現有函數（fetch_latest 等）不動，確保排程邏輯不受影響。
 use crate::constants::{FINMIND_API_BASE_URL, FINMIND_API_TIMEOUT_SECS, FINMIND_DATE_FORMAT};
-use crate::data::models::{current_timestamp_ms, RawCandle};
+use crate::data::models::RawCandle;
 use crate::domain::BridgeError;
 use crate::models::enums::{DataSource, Exchange, Interval};
-use std::collections::HashMap;
 
 use reqwest::Client;
 use serde::{Deserialize, Deserializer};
+use std::collections::HashMap;
 use tracing::{error, info, warn};
 
 // ── FinMind API 回應結構 ──────────────────────────────────────────────────────
@@ -188,8 +188,6 @@ pub async fn fetch_range(
         });
     }
 
-    let created_at_ms = current_timestamp_ms();
-
     let candles: Vec<RawCandle> = finmind_resp
         .data
         .into_iter()
@@ -213,18 +211,17 @@ pub async fn fetch_range(
 
             let timestamp_ms = date_str_to_ms(&date)?;
 
-            Some(RawCandle {
-                symbol: symbol.to_string(),
+            Some(RawCandle::new(
+                symbol.to_string(),
                 timestamp_ms,
                 interval,
                 open,
                 high,
                 low,
                 close,
-                volume: volume as u64,
-                source: DataSource::FinMind,
-                created_at_ms,
-            })
+                volume as u64,
+                DataSource::FinMind,
+            ))
         })
         .collect();
 

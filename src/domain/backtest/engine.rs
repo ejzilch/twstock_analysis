@@ -3,8 +3,9 @@
 /// 職責：接收 K 線資料與策略參數，執行模擬交易，回傳指標結果。
 /// 不依賴任何資料庫、HTTP、Redis。可單元測試。
 use super::constants::{
-    COMMISSION_RATE, DEFAULT_EXIT_FILTER_THRESHOLD, DEFAULT_MIN_HOLDING_DAYS, HARD_STOP_LOSS_PCT,
-    RISK_FREE_ANNUAL, TAX_RATE,
+    COMMISSION_RATE, DEFAULT_COOLDOWN_DAYS, DEFAULT_EXIT_FILTER_THRESHOLD,
+    DEFAULT_MIN_HOLDING_DAYS, DEFAULT_TP_BOLL_PCT, HARD_STOP_LOSS_PCT, RISK_FREE_ANNUAL, TAX_RATE,
+    TP_BOLL_CONSEC_DAYS,
 };
 use super::metrics::{compute_annualized_return, compute_max_drawdown, compute_sharpe_ratio};
 use crate::constants::{
@@ -46,6 +47,10 @@ pub struct BacktestInput<'a> {
     /// 不傳時使用預設值 5 天（DEFAULT_MIN_HOLDING_DAYS）。
     /// 傳 0 則等同停用（任何時候都可出場）。
     pub min_holding_days: Option<u32>,
+    /// 停利濾網：收盤連續 2 天超出布林上軌幾 % 就停利出場。
+    /// 不傳時使用預設值 5%（DEFAULT_TP_BOLL_PCT）。
+    /// 傳 0.0 則停用停利機制。
+    pub take_profit_boll_pct: Option<f64>,
 }
 
 /// 引擎輸出：完整回測結果（不含 symbol / from_ms 等 metadata，由 Service 補充）
@@ -72,6 +77,8 @@ pub struct TradeRecord {
     pub net_pnl: f64,
     /// 是否獲利
     pub is_win: bool,
+    /// 出場原因："signal" | "hard_stop" | "take_profit" | "forced"
+    pub exit_reason: String,
 }
 
 /// 回測指標
@@ -122,6 +129,12 @@ pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
         },
     };
 
+    let tp_boll_pct = match input.take_profit_boll_pct {
+        Some(v) if v < 0.0 => anyhow::bail!("take_profit_boll_pct must be >= 0.0"),
+        Some(v) => v / 100.0,
+        None => DEFAULT_TP_BOLL_PCT,
+    };
+
     // ── 預算指標序列 ──────────────────────────────────────────────────────────
     let closes: Vec<f64> = candles.iter().map(|c| c.close).collect();
     let bandwidth_series = compute_bandwidth_series(candles);
@@ -147,6 +160,10 @@ pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
     let mut entry_timestamp_ms = 0_i64;
     let mut entry_idx = 0_usize;
 
+    // ── 停利 & 冷卻狀態 ───────────────────────────────────────────────────────
+    let mut days_above_boll_high = 0_u32; // 連續超出布林上軌天數
+    let mut cooldown_remaining = 0_u32; // 停利後冷卻剩餘天數
+
     // ── 統計計數器 ────────────────────────────────────────────────────────────
     let mut winning_trades = 0_i32;
     let mut losing_trades = 0_i32;
@@ -163,6 +180,69 @@ pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
 
     // ── 主迴圈 ────────────────────────────────────────────────────────────────
     for i in 1..candles.len().saturating_sub(1) {
+        // 停利計數
+        if in_position {
+            let (boll_upper, _, _) = boll_series[i];
+            let tp_threshold = boll_upper * (1.0 + tp_boll_pct);
+            if boll_upper > 0.0 && candles[i].close > tp_threshold {
+                days_above_boll_high += 1;
+            } else {
+                days_above_boll_high = 0;
+            }
+        } else {
+            days_above_boll_high = 0;
+        }
+
+        let take_profit_triggered =
+            in_position && tp_boll_pct > 0.0 && days_above_boll_high >= TP_BOLL_CONSEC_DAYS;
+
+        // 停利優先，不受 is_market_tradeable 限制
+        if take_profit_triggered {
+            let exec_close = candles[i].close; // 當天收盤出場，不等下一根
+            let market_value = position_units * exec_close;
+            let sell_fee = market_value * (COMMISSION_RATE + TAX_RATE);
+            let cash_received = market_value - sell_fee;
+            equity = equity - position_cost + cash_received;
+
+            let buy_fee_paid = position_cost * COMMISSION_RATE;
+            let gross_pnl = market_value - position_cost;
+            let net_pnl = gross_pnl - buy_fee_paid - sell_fee;
+
+            update_trade_stats(
+                net_pnl,
+                position_cost,
+                &mut winning_trades,
+                &mut losing_trades,
+                &mut gross_profit,
+                &mut gross_loss,
+                &mut consecutive_wins,
+                &mut max_consecutive_wins,
+                &mut consecutive_losses,
+                &mut max_consecutive_losses,
+                &mut max_consecutive_loss_amount,
+                &mut current_loss_streak_amount,
+                &mut loss_streaks,
+            );
+
+            cooldown_remaining = DEFAULT_COOLDOWN_DAYS;
+
+            trades.push(TradeRecord {
+                entry_timestamp_ms,
+                exit_timestamp_ms: candles[i].timestamp_ms,
+                entry_price,
+                exit_price: exec_close,
+                net_pnl,
+                is_win: net_pnl >= 0.0,
+                exit_reason: "take_profit".to_string(),
+            });
+
+            in_position = false;
+            holding_days = 0;
+            position_units = 0.0;
+            position_cost = 0.0;
+            days_above_boll_high = 0;
+        }
+
         if !is_market_tradeable(&bandwidth_series, i) {
             if in_position {
                 holding_days += 1;
@@ -176,6 +256,7 @@ pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
             continue;
         }
 
+        // ── 進出場訊號（原有邏輯） ────────────────────────────────────────────
         let (should_hold, actual_position_fraction) = resolve_entry_signal(
             input,
             &ma5_series,
@@ -224,9 +305,11 @@ pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
             _ => strategy_wants_exit && drop_ratio >= exit_filter_threshold && can_exit,
         };
 
+        // 停利不受 min_holding_days 限制（已超漲，應立即保護獲利）
         let should_exit = (signal_exit || hard_stop_triggered) && in_position;
 
-        if should_hold && !in_position {
+        // ── 進場：冷卻期間封鎖 ────────────────────────────────────────────────
+        if should_hold && !in_position && cooldown_remaining == 0 {
             entry_timestamp_ms = candles[i + 1].timestamp_ms;
             entry_idx = i;
             let capital_deployed = equity * actual_position_fraction;
@@ -237,6 +320,7 @@ pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
             equity -= buy_fee;
             in_position = true;
             holding_days = 0;
+            days_above_boll_high = 0;
         } else if should_exit {
             let market_value = position_units * exec_close;
             let sell_fee = market_value * (COMMISSION_RATE + TAX_RATE);
@@ -263,6 +347,13 @@ pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
                 &mut loss_streaks,
             );
 
+            // 決定出場原因
+            let exit_reason = if hard_stop_triggered {
+                "hard_stop"
+            } else {
+                "signal"
+            };
+
             if hard_stop_triggered {
                 tracing::debug!(entry_price, exec_close, "Hard stop-loss triggered");
             }
@@ -274,6 +365,7 @@ pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
                 exit_price: exec_close,
                 net_pnl,
                 is_win: net_pnl >= 0.0,
+                exit_reason: exit_reason.to_string(),
             });
 
             in_position = false;
@@ -294,6 +386,11 @@ pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
         equity *= 1.0 + day_return;
         strategy_daily_returns.push(day_return);
         equity_curve.push(equity);
+
+        // ── 冷卻倒數（每天無條件遞減） ────────────────────────────────────────
+        if cooldown_remaining > 0 {
+            cooldown_remaining -= 1;
+        }
     }
 
     // ── 末日強制平倉 ──────────────────────────────────────────────────────────
@@ -331,6 +428,7 @@ pub fn run(input: &BacktestInput) -> anyhow::Result<BacktestOutput> {
             exit_price: last_close,
             net_pnl,
             is_win: net_pnl >= 0.0,
+            exit_reason: "forced".to_string(),
         });
     }
 
@@ -558,6 +656,7 @@ mod tests {
             position_size_percent: 100.0,
             exit_filter_pct: None,
             min_holding_days: None,
+            take_profit_boll_pct: Some(0.05),
         }
     }
 

@@ -20,3 +20,12 @@ pub const DEFAULT_MIN_HOLDING_DAYS: u32 = 5;
 
 // ── 硬停損 ────────────────────────────────────────────────────────────────────
 pub const HARD_STOP_LOSS_PCT: f64 = 0.03;
+
+// ── 停利：布林上軌超漲濾網 ───────────────────────────────────────────────────
+// 持倉中連續 TP_BOLL_CONSEC_DAYS 天收盤 > boll_upper × (1 + DEFAULT_TP_BOLL_PCT) 則停利出場
+pub const DEFAULT_TP_BOLL_PCT: f64 = 0.015; // 5%
+pub const TP_BOLL_CONSEC_DAYS: u32 = 2; // 連續 2 天
+
+// ── 停利後冷卻天數 ────────────────────────────────────────────────────────────
+// 停利出場後需等待此天數才重新允許進場（避免立刻追高）
+pub const DEFAULT_COOLDOWN_DAYS: u32 = 6;
