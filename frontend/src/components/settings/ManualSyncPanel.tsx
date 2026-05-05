@@ -42,11 +42,11 @@ export function ManualSyncPanel() {
   const today = new Date();
   const currentYear = today.getFullYear();
   // 直接組出兩年前的 1 月 1 日 (例如今年 2026，這裡會組出 "2020-01-01")
-  const defaultFromStr = `${currentYear - 6}-01-01`;
+  const defaultFromStr = `${currentYear - 5}-01-01`;
   // 處理 toDate，這裡建議也改用字串組合，避免 toISOString() 的時區問題
   // (toISOString() 會轉成 UTC 時間，在台灣時間早上 8 點前執行，日期會跑到前一天)
   const defaultToStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const [fromDate, setFromDate] = useState(defaultFromStr);  // e.g. "2020-01-01"
+  const [fromDate, setFromDate] = useState(defaultFromStr);  // e.g. "2021-01-01"
   const [toDate, setToDate] = useState(defaultToStr);        // e.g. "2026-04-23"
   const [interval, setInterval] = useState<'1m' | '5m' | '15m' | '1h' | '4h' | '1d'>('1d')
   const [allSymbolsMode, setAllSymbolsMode] = useState(false)
@@ -272,7 +272,7 @@ export function ManualSyncPanel() {
             </div>
             {allSymbolsMode ? (
               <div className="text-xs text-slate-400">
-                已選擇全部股票（不顯示列表）
+                已選擇全部股票（排程時會先同步 FinMind 全市場 symbols）
               </div>
             ) : (
               <SelectedSymbolTags

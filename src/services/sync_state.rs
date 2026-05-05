@@ -182,6 +182,18 @@ pub async fn find_running_sync(
     Ok(None)
 }
 
+pub async fn update_sync_status(
+    redis: &mut MultiplexedConnection,
+    sync_id: &str,
+    status: SyncStatus,
+) -> Result<(), BridgeError> {
+    if let Some(mut state) = load_sync_state(redis, sync_id).await? {
+        state.status = status;
+        save_sync_state(redis, &state).await?;
+    }
+    Ok(())
+}
+
 /// 設定取消旗標，讓背景同步流程在下一個批次安全停止。
 pub async fn request_sync_cancel(
     redis: &mut MultiplexedConnection,
