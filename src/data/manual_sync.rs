@@ -19,7 +19,7 @@ use crate::data::models::current_timestamp_ms;
 use crate::data::symbol_sync::{get_finmind_earliest_ms, upsert_symbols, SymbolSyncData};
 use crate::domain::BridgeError;
 use crate::models::enums::{DataSource, Exchange, Interval, SyncStatus};
-use crate::services::sync_state::is_sync_cancel_requested;
+use crate::services::sync_state::{is_sync_cancel_requested, update_sync_status};
 use chrono::{Duration, NaiveDate, Utc};
 use redis::aio::MultiplexedConnection;
 use reqwest::Client;
@@ -283,7 +283,19 @@ pub async fn fetch_and_insert_gap(
             })
             .await;
 
+        if let Some(resume_at_ms) = rate_limiter.predicted_resume_at_ms().await {
+            let _ = update_sync_status(redis, sync_id, SyncStatus::RateLimitWaiting).await;
+            info!(
+                sync_id = %sync_id,
+                symbol = %gap_info.symbol,
+                resume_at_ms = resume_at_ms,
+                "Rate limit reached; waiting for next window"
+            );
+        }
+
         rate_limiter.acquire().await.ok();
+
+        let _ = update_sync_status(redis, sync_id, SyncStatus::Running).await;
 
         let from_str = batch.from_date.to_string();
         let to_str = batch.to_date.to_string();

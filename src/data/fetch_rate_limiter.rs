@@ -150,6 +150,36 @@ impl FinMindRateLimiter {
         self.last_progress.lock().await.clone()
     }
 
+    /// 若目前呼叫 acquire() 會進入等待，回傳預估 resume_at_ms。
+    pub async fn predicted_resume_at_ms(&self) -> Option<i64> {
+        let safe_limit = FINMIND_RATE_LIMIT_PER_HOUR - FINMIND_RATE_LIMIT_BUFFER;
+        let mut timestamps = self.usage_timestamps.lock().await;
+        let now = Instant::now();
+        let window = Duration::from_secs(3_600);
+
+        while let Some(oldest) = timestamps.front() {
+            if now.duration_since(*oldest) >= window {
+                timestamps.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        if timestamps.len() < safe_limit as usize {
+            return None;
+        }
+
+        let oldest = *timestamps.front()?;
+        let release_time = oldest + window;
+        let remaining = release_time.saturating_duration_since(now);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+
+        Some(now_ms + remaining.as_millis() as i64)
+    }
+
     /// 在執行每次 FinMind 請求前呼叫。
     ///
     /// 行為：
