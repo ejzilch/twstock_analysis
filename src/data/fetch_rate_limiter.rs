@@ -13,7 +13,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tracing::info;
 
-use crate::constants::{FINMIND_RATE_LIMIT_BUFFER, FINMIND_RATE_LIMIT_PER_HOUR};
+use crate::constants::{
+    FINMIND_RATE_LIMIT_BUFFER, FINMIND_RATE_LIMIT_PER_HOUR, FINMIND_RATE_LIMIT_RESUME_DELAY_SECS,
+};
 
 // ── ApiTier（Gemini 原始設計，維持不動）──────────────────────────────────────
 
@@ -214,13 +216,15 @@ impl FinMindRateLimiter {
             };
 
             if let Some(wait_duration) = maybe_wait_duration {
-                let resume_instant = Instant::now() + wait_duration;
+                let wait_with_delay =
+                    wait_duration + Duration::from_secs(FINMIND_RATE_LIMIT_RESUME_DELAY_SECS);
+                let resume_instant = Instant::now() + wait_with_delay;
                 {
                     let mut resume_at = self.resume_at.lock().await;
                     *resume_at = Some(resume_instant);
                 }
 
-                tokio::time::sleep(wait_duration).await;
+                tokio::time::sleep(wait_with_delay).await;
                 {
                     let mut resume_at = self.resume_at.lock().await;
                     *resume_at = None;

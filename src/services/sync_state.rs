@@ -206,6 +206,24 @@ pub async fn request_sync_cancel(
         .map_err(|e| BridgeError::from_cache("request_sync_cancel failed", e))
 }
 
+/// 強制清除同步狀態與取消旗標，避免殘留狀態阻擋後續啟動。
+pub async fn clear_sync_state(
+    redis: &mut MultiplexedConnection,
+    sync_id: &str,
+) -> Result<(), BridgeError> {
+    let state_key = redis_key(sync_id);
+    let c_key = cancel_key(sync_id);
+    redis
+        .del::<_, ()>(&state_key)
+        .await
+        .map_err(|e| BridgeError::from_cache("clear_sync_state(state) failed", e))?;
+    redis
+        .del::<_, ()>(&c_key)
+        .await
+        .map_err(|e| BridgeError::from_cache("clear_sync_state(cancel) failed", e))?;
+    Ok(())
+}
+
 /// 檢查是否已請求取消。
 pub async fn is_sync_cancel_requested(
     redis: &mut MultiplexedConnection,

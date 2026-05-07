@@ -295,7 +295,7 @@ impl SyncService {
             db_pool.clone(),
             http_client,
             rate_limiter,
-            redis.clone(), // ← 傳入現有連線
+            redis.clone(), // 傳入現有連線
             sync_id.clone(),
             symbols,
             scope,

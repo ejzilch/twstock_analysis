@@ -1,8 +1,12 @@
 'use client'
 import { useEffect } from 'react'
-import { Card } from '@/src/components/ui'
+import { Button, Card } from '@/src/components/ui'
+import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/src/lib/api-client'
 import { useAppStore } from '@/src/store/useAppStore'
+import { useCancelSync } from '@/src/hooks/useManualSync'
+import { SyncProgress } from './SyncProgress'
+import type { SyncStatusResponse } from '@/src/types/api.types'
 
 interface DailyScheduleConfig { enabled: boolean; time: string }
 
@@ -13,6 +17,20 @@ export function DailySchedulePanel() {
     const setSchedule = useAppStore((s) => s.setSchedule)
     const setScheduleEnabled = useAppStore((s) => s.setScheduleEnabled)
     const setScheduleTime = useAppStore((s) => s.setScheduleTime)
+    const cancelSync = useCancelSync()
+    const syncStatus = useQuery<SyncStatusResponse>({
+        queryKey: ['sync-status-schedule-panel'],
+        queryFn: () => apiClient<SyncStatusResponse>('/api/v1/admin/sync/status'),
+        refetchInterval: (q) => {
+            const status = q.state.data?.status
+            return status === 'running' || status === 'rate_limit_waiting' ? 1_000 : 3_000
+        },
+        refetchIntervalInBackground: true,
+        staleTime: 0,
+        retry: false,
+    })
+    const currentStatus = syncStatus.data?.status ?? null
+    const isRunning = currentStatus === 'running' || currentStatus === 'rate_limit_waiting'
 
     // 只在第一次（store 尚未載入過）才 fetch
     useEffect(() => {
@@ -24,12 +42,15 @@ export function DailySchedulePanel() {
 
     // 狀態變更時 POST（跳過初始化）
     useEffect(() => {
+
         if (!loaded) return
         apiClient('/api/v1/admin/sync/schedule', {
             method: 'POST',
             body: JSON.stringify({ enabled, time }),
         }).catch(() => { })
     }, [enabled, time, loaded])
+
+    console.log(syncStatus);
 
     return (
         <Card>
@@ -44,10 +65,10 @@ export function DailySchedulePanel() {
                         onClick={() => setScheduleEnabled(!enabled)}
                         disabled={!loaded}
                         className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${!loaded
-                                ? 'bg-surface-border opacity-40 cursor-not-allowed'  // loading 狀態，不顯示任何傾向
-                                : enabled
-                                    ? 'bg-brand-600'
-                                    : 'bg-surface-border'
+                            ? 'bg-surface-border opacity-40 cursor-not-allowed'  // loading 狀態，不顯示任何傾向
+                            : enabled
+                                ? 'bg-brand-600'
+                                : 'bg-surface-border'
                             }`}
                     >
                         <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'
@@ -65,6 +86,26 @@ export function DailySchedulePanel() {
                         className="mt-1 w-full px-2 py-1.5 rounded bg-surface border border-surface-border text-sm text-slate-200 disabled:opacity-50"
                     />
                 </label>
+
+                {isRunning && syncStatus.data && (
+                    <div className="rounded-lg border border-surface-border bg-surface-card/40 p-3">
+                        <div className="text-xs text-slate-400 mb-2">
+                            偵測到背景同步進行中（含排程觸發），目前進度如下：
+                        </div>
+                        <SyncProgress
+                            progress={syncStatus.data.progress}
+                            rateLimit={syncStatus.data.rate_limit}
+                        />
+                        <Button
+                            variant="ghost"
+                            className="w-full mt-3"
+                            onClick={() => cancelSync.mutate({ syncId: syncStatus.data!.sync_id })}
+                            loading={cancelSync.isPending}
+                        >
+                            終止目前背景同步並清除排程狀態
+                        </Button>
+                    </div>
+                )}
             </div>
         </Card>
     )
