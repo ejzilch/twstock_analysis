@@ -10,7 +10,9 @@ use crate::models::enums::{SyncMode, SyncStatus};
 use crate::services::admin_sync::{
     StartSyncRequest, SymbolProgress, SyncService, SyncServiceError, SyncSummary,
 };
-use crate::services::sync_state::{find_running_sync, load_sync_state, request_sync_cancel};
+use crate::services::sync_state::{
+    clear_sync_state, find_running_sync, load_sync_state, request_sync_cancel, update_sync_status,
+};
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -213,15 +215,20 @@ pub async fn cancel_manual_sync(
 ) -> impl IntoResponse {
     let mut redis = state.redis_client.clone();
     match request_sync_cancel(&mut redis, &sync_id).await {
-        Ok(_) => (
-            StatusCode::ACCEPTED,
-            Json(serde_json::json!({
-                "sync_id": sync_id,
-                "status": "cancel_requested",
-                "timestamp_ms": current_timestamp_ms(),
-            })),
-        )
-            .into_response(),
+        Ok(_) => {
+            let _ = update_sync_status(&mut redis, &sync_id, SyncStatus::Failed).await;
+            let _ = clear_sync_state(&mut redis, &sync_id).await;
+            (
+                StatusCode::ACCEPTED,
+                Json(serde_json::json!({
+                    "sync_id": sync_id,
+                    "status": "cancel_requested",
+                    "redis_cleared": true,
+                    "timestamp_ms": current_timestamp_ms(),
+                })),
+            )
+                .into_response()
+        }
         Err(e) => {
             error!(error = %e, sync_id = %sync_id, "Failed to set cancel flag");
             (

@@ -65,12 +65,6 @@ export function BacktestResult({ result }: BacktestResultProps) {
                     value={`${metrics.winning_trades}W / ${metrics.losing_trades}L`}
                 />
             </div>
-
-            < div className="grid grid-cols-3 gap-3" >
-
-
-            </div>
-
             <div className="grid grid-cols-4 gap-3 mt-3">
                 <MetricCard label="總交易次數" value={String(metrics.total_trades)} />
                 <MetricCard

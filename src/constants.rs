@@ -42,6 +42,9 @@ pub const FINMIND_RATE_LIMIT_PER_HOUR: u32 = 600;
 /// 實際觸發等待的閾值為：FINMIND_RATE_LIMIT_PER_HOUR - FINMIND_RATE_LIMIT_BUFFER = 590
 pub const FINMIND_RATE_LIMIT_BUFFER: u32 = 10;
 
+/// 達到每小時上限後，額外延遲秒數（避免供應商用量統計有延遲）
+pub const FINMIND_RATE_LIMIT_RESUME_DELAY_SECS: u64 = 90;
+
 /// 手動補資料每批請求天數（約一個月）
 pub const MANUAL_SYNC_BATCH_DAYS: u32 = 30;
 
