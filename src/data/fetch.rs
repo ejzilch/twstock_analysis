@@ -13,7 +13,7 @@ use crate::models::enums::{DataSource, Exchange, Interval};
 
 use reqwest::Client;
 use serde::{Deserialize, Deserializer};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tracing::{error, info, warn};
 
 // ── FinMind API 回應結構 ──────────────────────────────────────────────────────
@@ -70,6 +70,73 @@ struct FinMindStockInfoRow {
 pub struct StockInfo {
     pub name: String,
     pub exchange: Exchange,
+}
+
+#[derive(Debug, Deserialize)]
+struct FinMindTradingDateResponse {
+    #[serde(deserialize_with = "de_status_code")]
+    status: u32,
+    #[serde(default)]
+    msg: String,
+    #[serde(default)]
+    data: Vec<FinMindTradingDateRow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FinMindTradingDateRow {
+    date: String,
+}
+
+pub async fn fetch_trading_dates(
+    client: &Client,
+    api_token: &str,
+    start_date: &str,
+    end_date: &str,
+) -> Result<HashSet<chrono::NaiveDate>, BridgeError> {
+    let base = std::env::var(FINMIND_API_BASE_URL).expect("FINMIND_API_BASE not set");
+    let url = format!(
+        "{base}/data?dataset=TaiwanStockTradingDate&start_date={start_date}&end_date={end_date}&token={api_token}"
+    );
+
+    let response = client
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(FINMIND_API_TIMEOUT_SECS))
+        .send()
+        .await
+        .map_err(|e| BridgeError::FinMindDataSourceError {
+            context: "FinMind TaiwanStockTradingDate request failed: ".into(),
+            source: Some(Box::new(e)),
+        })?;
+
+    let body = response
+        .text()
+        .await
+        .map_err(|e| BridgeError::FinMindDataSourceError {
+            context: "FinMind TaiwanStockTradingDate response body read failed: ".into(),
+            source: Some(Box::new(e)),
+        })?;
+
+    let finmind_resp: FinMindTradingDateResponse =
+        serde_json::from_str(&body).map_err(|e| BridgeError::FinMindDataSourceError {
+            context: "FinMind TaiwanStockTradingDate deserialization failed: ".into(),
+            source: Some(Box::new(e)),
+        })?;
+
+    if finmind_resp.status != 200 {
+        return Err(BridgeError::FinMindDataSourceError {
+            context: format!(
+                "FinMind TaiwanStockTradingDate error: status={}, msg={}",
+                finmind_resp.status, finmind_resp.msg
+            ),
+            source: None,
+        });
+    }
+
+    Ok(finmind_resp
+        .data
+        .into_iter()
+        .filter_map(|row| chrono::NaiveDate::parse_from_str(&row.date, FINMIND_DATE_FORMAT).ok())
+        .collect())
 }
 
 /// 取得指定股票的最新 K 線（排程用）。

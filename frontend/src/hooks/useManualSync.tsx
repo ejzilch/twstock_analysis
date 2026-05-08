@@ -24,8 +24,8 @@ import type {
   SyncStatusResponse,
 } from '@/src/types/api.types'
 
-// 輪詢間隔：同步狀態 1 秒；API quota 30 秒
-const SYNC_POLL_INTERVAL_MS = 1_000
+// 輪詢間隔：同步狀態 5 秒；API quota 30 秒
+const SYNC_POLL_INTERVAL_MS = 5_000
 const RATE_LIMIT_POLL_INTERVAL_MS = 30_000
 const API_V1_PREFIX = '/api/v1'
 
@@ -145,6 +145,7 @@ export function useCancelSync() {
 export function useSyncStatus() {
   const syncId = useAppStore((s) => s.activeSyncId)
   const setActiveSyncId = useAppStore((s) => s.setActiveSyncId)
+  const queryClient = useQueryClient()
 
   const query = useQuery<SyncStatusResponse>({
     queryKey: ['sync-status', syncId],
@@ -157,9 +158,18 @@ export function useSyncStatus() {
           buildAdminSyncPath(`/admin/sync/status/${syncId}`),
         )
       } catch (error) {
-        // 只有真正查無此 sync_id 時才清空；避免短暫錯誤中斷追蹤
-        if (error instanceof ApiErrorException && error.httpStatus === 404) {
-          setActiveSyncId(null)
+        if (error instanceof ApiErrorException) {
+          // 只有真正查無此 sync_id 時才清空；避免短暫錯誤中斷追蹤
+          if (error.httpStatus === 404) {
+            setActiveSyncId(null)
+            throw error
+          }
+
+          // 429 代表暫時限流：回退到最後一次成功快取，避免 UI 一直噴錯
+          if (error.httpStatus === 429 && syncId) {
+            const cached = queryClient.getQueryData<SyncStatusResponse>(['sync-status', syncId])
+            if (cached) return cached
+          }
         }
         throw error
       }

@@ -38,12 +38,12 @@ pub const FINMIND_API_TIMEOUT_SECS: u64 = 30;
 /// FinMind 免費方案每小時請求上限
 pub const FINMIND_RATE_LIMIT_PER_HOUR: u32 = 600;
 
-/// Rate limit 安全緩衝：保留 10 次，避免邊界誤差
-/// 實際觸發等待的閾值為：FINMIND_RATE_LIMIT_PER_HOUR - FINMIND_RATE_LIMIT_BUFFER = 590
-pub const FINMIND_RATE_LIMIT_BUFFER: u32 = 10;
+/// Rate limit 安全緩衝：保留 3 次，避免邊界誤差
+/// 實際觸發等待的閾值為：FINMIND_RATE_LIMIT_PER_HOUR - FINMIND_RATE_LIMIT_BUFFER = 597
+pub const FINMIND_RATE_LIMIT_BUFFER: u32 = 3;
 
 /// 達到每小時上限後，額外延遲秒數（避免供應商用量統計有延遲）
-pub const FINMIND_RATE_LIMIT_RESUME_DELAY_SECS: u64 = 90;
+pub const FINMIND_RATE_LIMIT_RESUME_DELAY_SECS: u64 = 45;
 
 /// 手動補資料每批請求天數（約一個月）
 pub const MANUAL_SYNC_BATCH_DAYS: u32 = 30;
@@ -55,6 +55,12 @@ pub const REDIS_SYNC_KEY_PREFIX: &str = "admin_sync";
 
 /// Redis sync 狀態 TTL（秒）：24 小時
 pub const REDIS_SYNC_TTL_SECS: u64 = 86_400;
+
+/// Redis 近五年交易日 cache key
+pub const REDIS_TRADING_DATES_KEY: &str = "calendar:twse:trading_dates:5y";
+
+/// Redis 近五年交易日 cache TTL（秒）：7 天
+pub const REDIS_TRADING_DATES_TTL_SECS: u64 = 604_800;
 
 // ── AI Service ────────────────────────────────────────────────────────────────
 

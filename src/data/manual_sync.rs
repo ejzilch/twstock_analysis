@@ -10,9 +10,12 @@
 ///   - 每批請求一個月的資料，控制單次請求大小
 ///   - 排程與手動同步共用 FinMindRateLimiter 實例
 ///   - Redis 連線由呼叫端（AppState）統一管理，不在此自行建立
-use crate::constants::{FINMIND_API_TOKEN_ENV, MANUAL_SYNC_BATCH_DAYS};
+use crate::constants::{
+    FINMIND_API_TOKEN_ENV, MANUAL_SYNC_BATCH_DAYS, REDIS_TRADING_DATES_KEY,
+    REDIS_TRADING_DATES_TTL_SECS,
+};
 use crate::data::db::{sync_log_update_counts, sync_log_update_status, BulkInsertBuffer};
-use crate::data::fetch::{fetch_range, fetch_stock_info_map};
+use crate::data::fetch::{fetch_range, fetch_stock_info_map, fetch_trading_dates};
 use crate::data::fetch_rate_limiter::{FinMindRateLimiter, SyncProgress};
 use crate::data::implementations::{PostgresDbWriter, RedisInvalidator};
 use crate::data::models::current_timestamp_ms;
@@ -20,11 +23,11 @@ use crate::data::symbol_sync::{get_finmind_earliest_ms, upsert_symbols, SymbolSy
 use crate::domain::BridgeError;
 use crate::models::enums::{DataSource, Exchange, Interval, SyncStatus};
 use crate::services::sync_state::{is_sync_cancel_requested, update_sync_status};
-use chrono::{Duration, NaiveDate, Utc};
-use redis::aio::MultiplexedConnection;
+use chrono::{Datelike, Duration, NaiveDate, Utc};
+use redis::{aio::MultiplexedConnection, AsyncCommands};
 use reqwest::Client;
 use sqlx::PgPool;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc, time::Instant};
 use tracing::{error, info, warn};
 
 // ── 所有支援的 K 線粒度（手動同步全部補齊）────────────────────────────────────
@@ -50,6 +53,8 @@ pub struct GapInfo {
     pub gap_a: Option<DateRange>,
     /// 缺口 B（近期段）：DB 最新 + 1 天 ~ 今天
     pub gap_b: Option<DateRange>,
+    /// 缺口 C（區間內部）：DB 內部斷點造成的缺值（精準到連續區段）
+    pub gap_internal: Vec<DateRange>,
 }
 
 /// 日期範圍（含頭含尾）。
@@ -86,6 +91,7 @@ pub async fn detect_gaps(
     db_pool: &PgPool,
     symbols: &[String],
     scope: &SyncScope,
+    trading_dates: &HashSet<NaiveDate>,
 ) -> Result<Vec<GapInfo>, BridgeError> {
     let today = Utc::now().date_naive();
     let selected_intervals = if scope.intervals.is_empty() {
@@ -111,9 +117,16 @@ pub async fn detect_gaps(
             });
 
         for interval in &selected_intervals {
-            let gap_info =
-                detect_gap_for_interval(db_pool, symbol, *interval, finmind_earliest, today, scope)
-                    .await?;
+            let gap_info = detect_gap_for_interval(
+                db_pool,
+                symbol,
+                *interval,
+                finmind_earliest,
+                today,
+                scope,
+                trading_dates,
+            )
+            .await?;
 
             gaps.push(gap_info);
         }
@@ -130,6 +143,7 @@ async fn detect_gap_for_interval(
     finmind_earliest: NaiveDate,
     today: NaiveDate,
     scope: &SyncScope,
+    trading_dates: &HashSet<NaiveDate>,
 ) -> Result<GapInfo, BridgeError> {
     let row = sqlx::query!(
         r#"
@@ -174,10 +188,11 @@ async fn detect_gap_for_interval(
             interval,
             gap_a: None,
             gap_b: None,
+            gap_internal: Vec::new(),
         });
     }
 
-    let (gap_a, gap_b) = match (row.db_oldest_ms, row.db_newest_ms) {
+    let (gap_a, gap_b, gap_internal) = match (row.db_oldest_ms, row.db_newest_ms) {
         (None, _) | (_, None) => {
             info!(
                 symbol = %symbol,
@@ -188,7 +203,7 @@ async fn detect_gap_for_interval(
                 from_date: range_start,
                 to_date: range_end,
             };
-            (Some(gap_a), None)
+            (Some(gap_a), None, Vec::new())
         }
 
         (Some(oldest_ms), Some(newest_ms)) => {
@@ -219,7 +234,17 @@ async fn detect_gap_for_interval(
                 None
             };
 
-            (gap_a, gap_b)
+            let internal_gaps = detect_internal_gaps(
+                db_pool,
+                symbol,
+                interval,
+                range_start.max(db_oldest),
+                range_end.min(db_newest),
+                trading_dates,
+            )
+            .await?;
+
+            (gap_a, gap_b, internal_gaps)
         }
     };
 
@@ -228,7 +253,81 @@ async fn detect_gap_for_interval(
         interval,
         gap_a,
         gap_b,
+        gap_internal,
     })
+}
+
+async fn detect_internal_gaps(
+    db_pool: &PgPool,
+    symbol: &str,
+    interval: Interval,
+    range_start: NaiveDate,
+    range_end: NaiveDate,
+    trading_dates: &HashSet<NaiveDate>,
+) -> Result<Vec<DateRange>, BridgeError> {
+    let rows = sqlx::query!(
+        r#"
+        WITH existing_days AS (
+            SELECT DISTINCT to_timestamp(timestamp_ms / 1000)::date AS day
+            FROM candles
+            WHERE symbol = $1
+              AND interval = $2
+              AND to_timestamp(timestamp_ms / 1000)::date BETWEEN $3 AND $4
+        ), sorted_days AS (
+            SELECT day, LAG(day) OVER (ORDER BY day) AS prev_day
+            FROM existing_days
+        )
+        SELECT
+            (prev_day + interval '1 day')::date AS missing_from,
+            (day - interval '1 day')::date AS missing_to
+        FROM sorted_days
+        WHERE prev_day IS NOT NULL
+          AND day > prev_day + interval '1 day'
+        ORDER BY missing_from
+        "#,
+        symbol,
+        interval.as_str(),
+        range_start,
+        range_end,
+    )
+    .fetch_all(db_pool)
+    .await
+    .map_err(|e| BridgeError::DatabaseError {
+        context: "Failed to detect internal missing ranges: ".into(),
+        source: Some(Box::new(e)),
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| match (row.missing_from, row.missing_to) {
+            (Some(from_date), Some(to_date)) if from_date <= to_date => {
+                Some(DateRange { from_date, to_date })
+            }
+            _ => None,
+        })
+        .filter_map(|r| {
+            if has_trading_day_in_range(trading_dates, r.from_date, r.to_date) {
+                Some(r)
+            } else {
+                None
+            }
+        })
+        .collect())
+}
+
+fn has_trading_day_in_range(
+    trading_dates: &HashSet<NaiveDate>,
+    from_date: NaiveDate,
+    to_date: NaiveDate,
+) -> bool {
+    let mut cursor = from_date;
+    while cursor <= to_date {
+        if trading_dates.contains(&cursor) {
+            return true;
+        }
+        cursor += Duration::days(1);
+    }
+    false
 }
 
 // ── fetch_and_insert_gap ──────────────────────────────────────────────────────
@@ -244,6 +343,9 @@ pub async fn fetch_and_insert_gap(
     gap_info: &GapInfo,
     gap: &DateRange,
 ) -> Result<(i32, i32, i32), BridgeError> {
+    // 問題查找
+    let gap_started = Instant::now();
+
     let api_token = std::env::var(FINMIND_API_TOKEN_ENV).unwrap_or_default();
 
     let batches = gap.clone().into_monthly_batches();
@@ -267,6 +369,9 @@ pub async fn fetch_and_insert_gap(
     let mut invalidator = RedisInvalidator::new(redis.clone());
 
     for (i, batch) in batches.iter().enumerate() {
+        // 問題查找
+        let batch_started = Instant::now();
+
         if is_sync_cancel_requested(redis, sync_id)
             .await
             .unwrap_or(false)
@@ -333,6 +438,7 @@ pub async fn fetch_and_insert_gap(
                     symbol   = %gap_info.symbol,
                     batch    = format!("{}/{}", i + 1, total_batches),
                     fetched  = fetched,
+                    elapsed_ms = batch_started.elapsed().as_millis() as u64,
                     "Batch fetched and pushed to buffer"
                 );
             }
@@ -356,7 +462,9 @@ pub async fn fetch_and_insert_gap(
         }
     }
 
+    let flush_started = Instant::now();
     buffer.flush(&writer, &mut invalidator).await?;
+    let flush_elapsed_ms = flush_started.elapsed().as_millis() as u64;
 
     let actual_inserted = buffer.total_inserted() - initial_inserted;
     let actual_skipped = buffer.total_skipped() - initial_skipped;
@@ -366,6 +474,23 @@ pub async fn fetch_and_insert_gap(
             .await
             .unwrap_or_else(|e| warn!(error = %e, "sync_log update failed"));
     }
+
+    info!(
+        sync_id = %sync_id,
+        symbol = %gap_info.symbol,
+        interval = %gap_info.interval.as_str(),
+        from_date = %gap.from_date,
+        to_date = %gap.to_date,
+        batches = total_batches,
+        inserted = actual_inserted,
+        skipped = actual_skipped,
+        failed_batches = total_failed,
+        flush_ms = flush_elapsed_ms,
+        total_elapsed_ms = gap_started.elapsed().as_millis() as u64,
+        db_pool_size = db_pool.size(),
+        db_pool_idle = db_pool.num_idle(),
+        "Gap execution diagnostics"
+    );
 
     Ok((actual_inserted, actual_skipped, total_failed))
 }
@@ -399,8 +524,18 @@ pub async fn run_manual_sync(
         );
     }
 
+    let trading_dates = match load_trading_dates_5y(&http_client, &rate_limiter, &mut redis_conn)
+        .await
+    {
+        Ok(dates) => dates,
+        Err(e) => {
+            warn!(error = %e, sync_id = %sync_id, "Failed to load trading dates cache; fallback to empty set");
+            HashSet::new()
+        }
+    };
+
     // Step 1: 偵測所有缺口
-    let gaps = match detect_gaps(&db_pool, &symbols, &scope).await {
+    let gaps = match detect_gaps(&db_pool, &symbols, &scope, &trading_dates).await {
         Ok(g) => g,
         Err(e) => {
             error!(error = %e, sync_id = %sync_id, "detect_gaps failed");
@@ -469,6 +604,33 @@ pub async fn run_manual_sync(
                         sync_id = %sync_id,
                         symbol  = %gap_info.symbol,
                         "Gap B fetch failed"
+                    );
+                }
+            }
+        }
+
+        for gap_internal in &gap_info.gap_internal {
+            let result = fetch_and_insert_gap(
+                &db_pool,
+                &http_client,
+                &rate_limiter,
+                &mut buffer,
+                &mut redis_conn,
+                &sync_id,
+                gap_info,
+                gap_internal,
+            )
+            .await;
+
+            match result {
+                Ok((_, _, failed)) => total_failed_batches += failed,
+                Err(e) => {
+                    has_gap_error = true;
+                    error!(
+                        error   = %e,
+                        sync_id = %sync_id,
+                        symbol  = %gap_info.symbol,
+                        "Internal gap fetch failed"
                     );
                 }
             }
@@ -549,6 +711,61 @@ async fn ensure_symbols_metadata(
     );
 
     Ok(())
+}
+
+async fn load_trading_dates_5y(
+    http_client: &Client,
+    rate_limiter: &Arc<FinMindRateLimiter>,
+    redis: &mut MultiplexedConnection,
+) -> Result<HashSet<NaiveDate>, BridgeError> {
+    let cached: Option<String> = redis.get(REDIS_TRADING_DATES_KEY).await.ok();
+    if let Some(raw) = cached {
+        if let Ok(days) = serde_json::from_str::<Vec<String>>(&raw) {
+            let parsed: HashSet<NaiveDate> = days
+                .into_iter()
+                .filter_map(|d| NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
+                .collect();
+            if !parsed.is_empty() {
+                return Ok(parsed);
+            }
+        }
+    }
+
+    let today = Utc::now().date_naive();
+    let start_year = today.year() - 5;
+    let start =
+        NaiveDate::from_ymd_opt(start_year, 1, 1).unwrap_or(today - Duration::days(365 * 5));
+    let end = NaiveDate::from_ymd_opt(today.year(), 12, 31).unwrap_or(today);
+    let api_token = std::env::var(FINMIND_API_TOKEN_ENV).unwrap_or_default();
+
+    rate_limiter.acquire().await.ok();
+    let fetched = fetch_trading_dates(
+        http_client,
+        &api_token,
+        &start.format("%Y-%m-%d").to_string(),
+        &end.format("%Y-%m-%d").to_string(),
+    )
+    .await?;
+    rate_limiter.mark_request_used().await;
+
+    if !fetched.is_empty() {
+        let mut vec_days: Vec<String> = fetched
+            .iter()
+            .map(|d| d.format("%Y-%m-%d").to_string())
+            .collect();
+        vec_days.sort();
+        if let Ok(payload) = serde_json::to_string(&vec_days) {
+            let _: redis::RedisResult<()> = redis
+                .set_ex(
+                    REDIS_TRADING_DATES_KEY,
+                    payload,
+                    REDIS_TRADING_DATES_TTL_SECS,
+                )
+                .await;
+        }
+    }
+
+    Ok(fetched)
 }
 
 #[cfg(test)]

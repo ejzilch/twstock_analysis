@@ -140,14 +140,29 @@ pub async fn get_sync_status(State(state): State<Arc<AppState>>) -> impl IntoRes
             .await
             .into_response(),
         Ok(None) => (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({
-                "error_code": ERROR_SYNC_NOT_FOUND,
-                "message": "No active sync found.",
-                "fallback_available": false,
-                "timestamp_ms": current_timestamp_ms(),
-                "request_id": null,
-            })),
+            StatusCode::OK,
+            Json(
+                serde_json::to_value(SyncStatusResponse {
+                    sync_id: "".to_string(),
+                    status: SyncStatus::Idle,
+                    started_at_ms: 0,
+                    rate_limit: RateLimitInfo {
+                        used_this_hour: 0,
+                        limit_per_hour: state.rate_limiter.limit_per_hour(),
+                        is_waiting: false,
+                        resume_at_ms: None,
+                    },
+                    progress: vec![],
+                    summary: SyncSummary {
+                        total_symbols: 0,
+                        completed_symbols: 0,
+                        total_inserted: 0,
+                        total_skipped: 0,
+                        total_failed: 0,
+                    },
+                })
+                .unwrap_or_default(),
+            ),
         )
             .into_response(),
         Err(e) => {
