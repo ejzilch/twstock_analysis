@@ -109,7 +109,7 @@ Layered Architecture (inspired by Clean Architecture / DDD)
 
 ``` bash
 # Clone the repository
-git clone [https://github.com/ejzilch/twstock_analysis.git](https://github.com/ejzilch/twstock_analysis.git)
+git clone https://github.com/ejzilch/twstock_analysis.git
 cd twstock_analysis
 
 # Setup environment variables
