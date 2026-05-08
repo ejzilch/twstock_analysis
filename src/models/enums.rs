@@ -203,6 +203,7 @@ pub enum SyncStatus {
     RateLimitWaiting,
     Completed,
     Failed,
+    Idle,
 }
 
 impl SyncStatus {
@@ -212,6 +213,7 @@ impl SyncStatus {
             SyncStatus::RateLimitWaiting => "rate_limit_waiting",
             SyncStatus::Completed => "completed",
             SyncStatus::Failed => "failed",
+            SyncStatus::Idle => "idle",
         }
     }
 

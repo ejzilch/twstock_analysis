@@ -2,7 +2,7 @@
 import { useEffect } from 'react'
 import { Button, Card } from '@/src/components/ui'
 import { useQuery } from '@tanstack/react-query'
-import { apiClient } from '@/src/lib/api-client'
+import { apiClient, ApiErrorException } from '@/src/lib/api-client'
 import { useAppStore } from '@/src/store/useAppStore'
 import { useCancelSync } from '@/src/hooks/useManualSync'
 import { SyncProgress } from './SyncProgress'
@@ -14,16 +14,22 @@ export function DailySchedulePanel() {
     const enabled = useAppStore((s) => s.scheduleEnabled)
     const time = useAppStore((s) => s.scheduleTime)
     const loaded = useAppStore((s) => s.scheduleLoaded)
+    const activeSyncId = useAppStore((s) => s.activeSyncId)
     const setSchedule = useAppStore((s) => s.setSchedule)
     const setScheduleEnabled = useAppStore((s) => s.setScheduleEnabled)
     const setScheduleTime = useAppStore((s) => s.setScheduleTime)
     const cancelSync = useCancelSync()
-    const syncStatus = useQuery<SyncStatusResponse>({
+    const syncStatus = useQuery<SyncStatusResponse | null>({
         queryKey: ['sync-status-schedule-panel'],
-        queryFn: () => apiClient<SyncStatusResponse>('/api/v1/admin/sync/status'),
-        refetchInterval: (q) => {
-            const status = q.state.data?.status
-            return status === 'running' || status === 'rate_limit_waiting' ? 1_000 : 3_000
+        queryFn: async () => {
+            try {
+                return await apiClient<SyncStatusResponse>('/api/v1/admin/sync/status')
+            } catch (error) {
+                if (error instanceof ApiErrorException && error.httpStatus === 429) {
+                    return null
+                }
+                throw error
+            }
         },
         refetchIntervalInBackground: true,
         staleTime: 0,
@@ -31,6 +37,7 @@ export function DailySchedulePanel() {
     })
     const currentStatus = syncStatus.data?.status ?? null
     const isRunning = currentStatus === 'running' || currentStatus === 'rate_limit_waiting'
+    const isManualSync = !!activeSyncId && activeSyncId === syncStatus.data?.sync_id
 
     // 只在第一次（store 尚未載入過）才 fetch
     useEffect(() => {
@@ -49,8 +56,6 @@ export function DailySchedulePanel() {
             body: JSON.stringify({ enabled, time }),
         }).catch(() => { })
     }, [enabled, time, loaded])
-
-    console.log(syncStatus);
 
     return (
         <Card>
@@ -87,7 +92,7 @@ export function DailySchedulePanel() {
                     />
                 </label>
 
-                {isRunning && syncStatus.data && (
+                {isRunning && syncStatus.data && !isManualSync && (
                     <div className="rounded-lg border border-surface-border bg-surface-card/40 p-3">
                         <div className="text-xs text-slate-400 mb-2">
                             偵測到背景同步進行中（含排程觸發），目前進度如下：

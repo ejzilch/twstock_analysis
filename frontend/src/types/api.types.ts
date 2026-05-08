@@ -63,6 +63,7 @@ export type SyncStatus =
     | 'rate_limit_waiting'
     | 'completed'
     | 'failed'
+    | 'idle'
 
 export type SymbolSyncStatus =
     | 'pending'

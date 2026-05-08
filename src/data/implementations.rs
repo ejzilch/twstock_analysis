@@ -7,6 +7,7 @@ use crate::domain::BridgeError;
 use async_trait::async_trait;
 use redis::aio::MultiplexedConnection;
 use sqlx::PgPool;
+use std::time::Instant;
 use tracing::{error, info};
 
 // ── PostgresDbWriter ──────────────────────────────────────────────────────────
@@ -29,6 +30,11 @@ impl DbWriter for PostgresDbWriter {
             return Ok(0);
         }
 
+        // 問題查找
+        let pool_size = self.pool.size();
+        let pool_idle = self.pool.num_idle();
+        let begin_started = Instant::now();
+
         let mut tx = self.pool.begin().await.map_err(|e| {
             error!(error = %e, "Failed to begin transaction");
             BridgeError::FinMindDataSourceError {
@@ -37,6 +43,9 @@ impl DbWriter for PostgresDbWriter {
             }
         })?;
 
+        // 問題查找
+        let begin_elapsed_ms = begin_started.elapsed().as_millis() as u64;
+        let insert_started = Instant::now();
         let mut written = 0usize;
 
         for candle in batch {
@@ -82,6 +91,10 @@ impl DbWriter for PostgresDbWriter {
             }
         }
 
+        // 問題查找
+        let insert_elapsed_ms = insert_started.elapsed().as_millis() as u64;
+        let commit_started = Instant::now();
+
         tx.commit().await.map_err(|e| {
             error!(error = %e, "Failed to commit candle batch");
             BridgeError::FinMindDataSourceError {
@@ -90,10 +103,19 @@ impl DbWriter for PostgresDbWriter {
             }
         })?;
 
+        // 問題查找
+        let commit_elapsed_ms = commit_started.elapsed().as_millis() as u64;
+
         info!(
             total = batch.len(),
             written,
             skipped = batch.len() - written,
+            // 問題查找
+            pool_size,
+            pool_idle,
+            tx_begin_ms = begin_elapsed_ms,
+            inserts_ms = insert_elapsed_ms,
+            tx_commit_ms = commit_elapsed_ms,
             "Candle batch committed"
         );
         Ok(written)
