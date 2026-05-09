@@ -1,4 +1,4 @@
-# AI Bridge - 系統架構設計
+# TW Stock Analysis - 系統架構設計
 
 版本: 2.2
 更新日期: 2026-04-11

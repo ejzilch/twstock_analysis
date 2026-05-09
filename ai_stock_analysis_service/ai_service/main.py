@@ -1,5 +1,5 @@
 """
-AI Bridge — Python AI Service
+TW Stock Analysis — Python AI Service
 FastAPI application entry point.
 Handles SIGTERM gracefully: completes in-flight requests before shutdown.
 """
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("AI Bridge AI Service v%s starting up", APP_VERSION)
+    logger.info("TW Stock Analysis AI Service v%s starting up", APP_VERSION)
     ModelRegistry.instance().load()
     yield
     # Shutdown: FastAPI waits for in-flight requests to complete before here
@@ -42,7 +42,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="AI Bridge — Python AI Service",
+    title="TW Stock Analysis — Python AI Service",
     version=APP_VERSION,
     lifespan=lifespan,
 )

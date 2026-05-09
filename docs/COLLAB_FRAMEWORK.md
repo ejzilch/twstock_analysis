@@ -1,4 +1,4 @@
-# AI Bridge - 協作框架
+# TW Stock Analysis - 協作框架
 
 版本: 3.2
 更新日期: 2026-04-11

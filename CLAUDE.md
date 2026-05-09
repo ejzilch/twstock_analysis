@@ -1,4 +1,4 @@
-# CLAUDE.md - AI Bridge 工作記憶
+# CLAUDE.md - TW Stock Analysis 工作記憶
 
 > Claude Code 每次 session 自動載入。完整文件在 docs/ 下的 *.md。
 

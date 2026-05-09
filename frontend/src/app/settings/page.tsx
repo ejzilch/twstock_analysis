@@ -56,7 +56,7 @@ export default function SettingsPage() {
           )}
 
           <div className="text-center text-xs text-slate-600 py-2">
-            AI Bridge Frontend · v0.1.0 · API Contract v2.2
+            TW Stock Analysis Frontend · v0.1.0 · API Contract v2.2
           </div>
         </div>
       </div>

@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
     // 初始化 tracing
     init_tracing();
 
-    tracing::info!("Starting AI Bridge API server");
+    tracing::info!("Starting TW Stock Analysis API server");
 
     // 初始化 PostgreSQL 連線池
     let database_url =

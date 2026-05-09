@@ -1,4 +1,4 @@
-# AI Bridge — Python AI Service
+# TW Stock Analysis — Python AI Service
 
 ## 技術棧
 - FastAPI + Uvicorn

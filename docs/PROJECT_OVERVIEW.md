@@ -1,4 +1,4 @@
-# AI Bridge - 專案概覽
+# TW Stock Analysis - 專案概覽
 
 版本: 2.0
 更新日期: 2026-04-11

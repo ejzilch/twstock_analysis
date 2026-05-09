@@ -1,4 +1,4 @@
-# AI Bridge - 手動同步 Spec
+# TW Stock Analysis - 手動同步 Spec
 
 **版本：** 1.1
 **日期：** 2026-04-19

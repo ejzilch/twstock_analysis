@@ -6,7 +6,7 @@ import { ColorModeToggle } from '@/src/components/features/theme'
 import './globals.css'
 
 export const metadata: Metadata = {
-    title: 'AI Bridge — 股票分析與交易信號系統',
+    title: 'TW Stock Analysis — 股票分析與交易信號系統',
     description: '準確、穩定、高效的股票分析與交易信號系統',
 }
 
@@ -31,7 +31,7 @@ function Sidebar() {
     return (
         <aside className="w-64 shrink-0 bg-surface-card border-r border-surface-border flex flex-col z-10">
             <div className="px-5 py-5 border-b border-surface-border">
-                <div className="text-xs text-slate-500 tracking-widest uppercase mb-0.5">AI Bridge</div>
+                <div className="text-xs text-slate-500 tracking-widest uppercase mb-0.5">TW Stock Analysis</div>
                 <div className="text-base font-semibold text-slate-100">交易信號系統</div>
             </div>
             {/* SidebarNav is a client component that reads pathname for active state */}
