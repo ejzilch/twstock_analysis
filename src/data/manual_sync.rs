@@ -676,14 +676,37 @@ async fn ensure_symbols_metadata(
         return Ok(());
     }
 
+    // 先查 DB，過濾掉已有 metadata 的 symbol
+    let existing: HashSet<String> = sqlx::query_scalar!(
+        "SELECT symbol FROM symbols WHERE symbol = ANY($1) AND name IS NOT NULL",
+        &symbols as &[String]
+    )
+    .fetch_all(db_pool)
+    .await
+    .map_err(|e| BridgeError::from_db("ensure_symbols_metadata: query existing symbols failed", e))?
+    .into_iter()
+    .collect();
+
+    let missing: Vec<String> = symbols
+        .iter()
+        .filter(|s| !existing.contains(*s))
+        .cloned()
+        .collect();
+
+    // 省掉一次 TaiwanStockInfo 請求
+    if missing.is_empty() {
+        return Ok(());
+    }
+
     let api_token = std::env::var(FINMIND_API_TOKEN_ENV).unwrap_or_default();
 
     rate_limiter.acquire().await.ok();
     let stock_info_map = fetch_stock_info_map(http_client, &api_token).await?;
     rate_limiter.mark_request_used().await;
 
+    // 只 upsert 真正缺失的 symbol
     let now_ms = current_timestamp_ms();
-    let upsert_payload: Vec<SymbolSyncData> = symbols
+    let upsert_payload: Vec<SymbolSyncData> = missing
         .iter()
         .map(|symbol| {
             let info = stock_info_map.get(symbol);

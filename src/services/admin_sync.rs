@@ -1,6 +1,3 @@
-use crate::app_state::AppState;
-use crate::constants::{FINMIND_RATE_LIMIT_BUFFER, FINMIND_RATE_LIMIT_PER_HOUR};
-use crate::data::db::{sync_log_create, SyncLogEntry};
 /// SyncService — 手動同步業務流程協調者（Service layer）
 ///
 /// 職責：
@@ -11,12 +8,18 @@ use crate::data::db::{sync_log_create, SyncLogEntry};
 ///   5. 組裝 StartSyncResult
 ///
 /// admin_sync handler 只做 parse → call service → return response。
+use crate::app_state::AppState;
+use crate::constants::{FINMIND_RATE_LIMIT_BUFFER, FINMIND_RATE_LIMIT_PER_HOUR};
+use crate::data::db::{sync_log_create, SyncLogEntry};
 use crate::data::fetch_rate_limiter::FinMindRateLimiter;
 use crate::data::manual_sync::{run_manual_sync, SyncScope};
-use crate::data::models::current_timestamp_ms;
+use crate::data::{db::fetch_final_sync_state_from_db, models::current_timestamp_ms};
 use crate::domain::BridgeError;
-use crate::models::enums::{SymbolSyncStatus, SyncMode, SyncStatus};
+use crate::models::enums::{SyncMode, SyncStatus};
 use crate::BulkInsertBuffer;
+
+use super::sync_state::{find_running_sync, save_sync_state, SyncState};
+
 use chrono::{Local, Months, NaiveDate};
 use redis::aio::MultiplexedConnection;
 use reqwest::Client;
@@ -24,8 +27,6 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::sync::Arc;
 use tracing::{error, info, warn};
-
-use super::sync_state::{find_running_sync, save_sync_state, SyncState};
 
 // ── 請求 DTO ──────────────────────────────────────────────────────────────────
 
@@ -58,29 +59,6 @@ pub struct SyncSummary {
     pub total_inserted: i32,
     pub total_skipped: i32,
     pub total_failed: i32,
-}
-
-/// 單一股票的同步進度
-#[derive(Debug, Serialize, Clone, Deserialize)]
-pub struct SymbolProgress {
-    pub symbol: String,
-    pub name: String,
-    pub status: SymbolSyncStatus,
-    /// 缺口 A（歷史段）進度，None 表示無此缺口
-    pub gap_a: Option<GapProgress>,
-    /// 缺口 B（近期段）進度，None 表示無此缺口
-    pub gap_b: Option<GapProgress>,
-}
-
-/// 單一缺口的進度
-#[derive(Debug, Serialize, Clone, Deserialize)]
-pub struct GapProgress {
-    pub from_ms: i64,
-    pub to_ms: i64,
-    pub inserted: i32,
-    pub skipped: i32,
-    pub failed: i32,
-    pub completed: bool,
 }
 
 // ── Service 入口 ──────────────────────────────────────────────────────────────
@@ -335,78 +313,6 @@ pub async fn get_all_active_symbols(db: &PgPool) -> Result<Vec<String>, BridgeEr
         .map_err(|e| BridgeError::from_db("get_all_active_symbols failed", e))?;
 
     Ok(rows.into_iter().map(|r| r.symbol).collect())
-}
-
-/// 從 sync_log 讀取最終狀態，組裝 SyncState（供背景 task 回寫 Redis 用）
-async fn fetch_final_sync_state_from_db(
-    db_pool: &PgPool,
-    sync_id: &str,
-) -> Result<Option<SyncState>, BridgeError> {
-    use crate::models::enums::SymbolSyncStatus;
-    use crate::services::admin_sync::SyncSummary;
-
-    let row = sqlx::query!(
-        r#"
-        SELECT sync_id, symbols,
-               total_inserted, total_skipped, total_failed,
-               started_at_ms, status
-        FROM sync_log WHERE sync_id = $1
-        "#,
-        sync_id
-    )
-    .fetch_optional(db_pool)
-    .await
-    .map_err(|e| BridgeError::from_db("fetch_final_sync_state failed", e))?;
-
-    let row = match row {
-        None => return Ok(None),
-        Some(r) => r,
-    };
-
-    let status = match row.status.as_str() {
-        "running" => SyncStatus::Running,
-        "rate_limit_waiting" => SyncStatus::RateLimitWaiting,
-        "completed" => SyncStatus::Completed,
-        _ => SyncStatus::Failed,
-    };
-
-    let symbols = row.symbols;
-    let total = symbols.len();
-    let symbol_status = if status == SyncStatus::Completed {
-        SymbolSyncStatus::Completed
-    } else {
-        SymbolSyncStatus::Pending
-    };
-
-    let progress: Vec<SymbolProgress> = symbols
-        .iter()
-        .map(|s| SymbolProgress {
-            symbol: s.clone(),
-            name: String::new(),
-            status: symbol_status.clone(),
-            gap_a: None,
-            gap_b: None,
-        })
-        .collect();
-
-    Ok(Some(SyncState {
-        sync_id: row.sync_id,
-        status: status.clone(),
-        started_at_ms: row.started_at_ms,
-        symbols,
-        progress,
-        summary: SyncSummary {
-            total_symbols: total,
-            completed_symbols: if status == SyncStatus::Completed {
-                total
-            } else {
-                0
-            },
-            total_inserted: row.total_inserted,
-            total_skipped: row.total_skipped,
-            total_failed: row.total_failed,
-        },
-    }))
 }
 
 // ── 單元測試 ──────────────────────────────────────────────────────────────────

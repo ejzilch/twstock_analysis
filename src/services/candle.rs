@@ -8,11 +8,11 @@
 ///   5. 組裝 CandlesApiResponse
 use crate::app_state::AppState;
 use crate::constants::CANDLES_MAX_PER_REQUEST;
+use crate::data::candle_query::{count_candles, fetch_candles_range, symbol_exists};
 use crate::domain::indicators::factory::IndicatorFactory;
 use crate::models::indicators::{BollingerConfig, IndicatorConfig};
 use crate::models::{Candle, FetchSource, IndicatorValue, Interval};
 
-use anyhow::anyhow;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -58,13 +58,18 @@ impl CandlesService {
         params: &CandlesParams,
     ) -> anyhow::Result<CandlesResult> {
         // ── Step 1: 確認 symbol 存在 ──────────────────────────────────────────
-        Self::validate_symbol(state, symbol).await?;
-
-        let interval = params.interval;
+        symbol_exists(&state.db_pool, symbol).await?;
 
         // ── Step 2: 查詢總筆數，超過上限直接拒絕 ─────────────────────────────
-        let total_available =
-            Self::count_candles(state, symbol, interval, params.from_ms, params.to_ms).await?;
+        let interval = params.interval;
+        let total_available = count_candles(
+            &state.db_pool,
+            symbol,
+            interval,
+            params.from_ms,
+            params.to_ms,
+        )
+        .await?;
 
         if total_available > CANDLES_MAX_PER_REQUEST {
             return Err(anyhow::anyhow!(
@@ -98,53 +103,6 @@ impl CandlesService {
 
     // ── 私有方法 ──────────────────────────────────────────────────────────────
 
-    async fn validate_symbol(state: &AppState, symbol: &str) -> Result<(), anyhow::Error> {
-        let exists: Option<bool> = sqlx::query_scalar!(
-            r#"SELECT is_active as "is_active!" FROM symbols WHERE symbol = $1"#,
-            symbol
-        )
-        .fetch_optional(&state.db_pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, symbol = %symbol, "DB error checking symbol");
-            anyhow!("Data source interrupted")
-        })?;
-
-        match exists {
-            Some(_) => Ok(()),
-            None => Err(anyhow!(symbol.to_string())),
-        }
-    }
-
-    async fn count_candles(
-        state: &AppState,
-        symbol: &str,
-        interval: Interval,
-        from_ms: i64,
-        to_ms: i64,
-    ) -> Result<usize, anyhow::Error> {
-        let count: i64 = sqlx::query_scalar!(
-            r#"
-            SELECT COUNT(*) AS "count!"
-            FROM candles
-            WHERE symbol = $1 AND interval = $2
-              AND timestamp_ms BETWEEN $3 AND $4
-            "#,
-            symbol,
-            interval.as_str(),
-            from_ms,
-            to_ms
-        )
-        .fetch_one(&state.db_pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to count candles");
-            anyhow!("Data source interrupted")
-        })?;
-
-        Ok(count as usize)
-    }
-
     async fn fetch_with_cache(
         state: &AppState,
         symbol: &str,
@@ -167,7 +125,7 @@ impl CandlesService {
             }
         }
 
-        let candles = Self::fetch_from_db(state, symbol, interval, from_ms, to_ms).await?;
+        let candles = Self::fetch_from_db(&state, symbol, interval, from_ms, to_ms).await?;
         Ok((candles, FetchSource::Database, false))
     }
 
@@ -178,35 +136,9 @@ impl CandlesService {
         from_ms: i64,
         to_ms: i64,
     ) -> Result<Vec<CandleData>, anyhow::Error> {
-        struct CandleRow {
-            timestamp_ms: i64,
-            open: f64,
-            high: f64,
-            low: f64,
-            close: f64,
-            volume: i64,
-        }
-
-        let rows = sqlx::query_as!(
-            CandleRow,
-            r#"
-            SELECT timestamp_ms, open, high, low, close, volume
-            FROM candles
-            WHERE symbol = $1 AND interval = $2
-              AND timestamp_ms BETWEEN $3 AND $4
-            ORDER BY timestamp_ms ASC
-            "#,
-            symbol,
-            interval.as_str(),
-            from_ms,
-            to_ms
-        )
-        .fetch_all(&state.db_pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to fetch candles from DB");
-            anyhow!("Data source interrupted")
-        })?;
+        let rows = fetch_candles_range(&state.db_pool, symbol, interval, from_ms, to_ms)
+            .await
+            .map_err(|e| anyhow::anyhow!("fetch candles failed: {e}"))?;
 
         Ok(rows
             .into_iter()

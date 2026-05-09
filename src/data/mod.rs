@@ -6,6 +6,7 @@
 /// - fetch_rate_limiter: FinMind API 排程限流，預留付費升級介面
 /// - db:                 Bulk Insert 緩衝區、Redis 快取失效
 /// - symbol_sync:        動態 Symbol 清單每日同步
+pub mod candle_query;
 pub mod db;
 pub mod fetch;
 pub mod fetch_rate_limiter;

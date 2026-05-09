@@ -2,15 +2,17 @@
 ///
 /// 改用 redis::aio::MultiplexedConnection（async），
 /// 對應 AppState 中的 redis_client 型別。
+use crate::constants::{REDIS_SYNC_KEY_PREFIX, REDIS_SYNC_TTL_SECS};
+use crate::domain::BridgeError;
+use crate::models::enums::{SymbolSyncStatus, SyncStatus};
+use crate::services::admin_sync::SyncSummary;
+
+use super::sync_types::{GapProgress, SymbolProgress};
+
 use redis::aio::MultiplexedConnection;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
-
-use crate::constants::{REDIS_SYNC_KEY_PREFIX, REDIS_SYNC_TTL_SECS};
-use crate::domain::BridgeError;
-use crate::models::enums::{SymbolSyncStatus, SyncStatus};
-use crate::services::admin_sync::{GapProgress, SymbolProgress, SyncSummary};
 
 /// Redis 中儲存的完整同步狀態。
 #[derive(Debug, Serialize, Deserialize, Clone)]

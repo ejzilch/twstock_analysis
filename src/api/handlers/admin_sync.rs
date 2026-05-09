@@ -1,18 +1,18 @@
-use crate::app_state::AppState;
-use crate::constants::{ERROR_SYNC_ALREADY_RUNNING, ERROR_SYNC_NOT_FOUND};
-use crate::data::models::current_timestamp_ms;
-use crate::models::enums::Interval;
 /// 手動同步 API handlers — 薄 handler 層
 ///
 /// 職責：parse request → call service → build HTTP response。
 /// 所有業務邏輯（日期解析、Redis 狀態、背景 task）已移至 SyncService。
+use crate::app_state::AppState;
+use crate::constants::{ERROR_SYNC_ALREADY_RUNNING, ERROR_SYNC_NOT_FOUND};
+use crate::data::models::current_timestamp_ms;
+use crate::models::enums::Interval;
 use crate::models::enums::{SyncMode, SyncStatus};
-use crate::services::admin_sync::{
-    StartSyncRequest, SymbolProgress, SyncService, SyncServiceError, SyncSummary,
-};
+use crate::services::admin_sync::{StartSyncRequest, SyncService, SyncServiceError, SyncSummary};
 use crate::services::sync_state::{
     clear_sync_state, find_running_sync, load_sync_state, request_sync_cancel, update_sync_status,
 };
+use crate::services::sync_types::SymbolProgress;
+
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

@@ -13,10 +13,11 @@ use crate::constants::{BULK_INSERT_MAX_BATCH_SIZE, BULK_INSERT_MAX_WAIT_MS};
 use crate::data::models::RawCandle;
 use crate::data::traits::{CacheInvalidator, DbWriter};
 use crate::domain::BridgeError;
+use crate::models::enums::SyncStatus;
+use crate::services::{sync_state::SyncState, sync_types::SymbolProgress};
 use sqlx::PgPool;
-use tracing::error;
-
 use std::time::{Duration, Instant};
+use tracing::error;
 use tracing::info;
 
 // ── BulkInsertBuffer ──────────────────────────────────────────────────────────
@@ -265,4 +266,76 @@ pub async fn sync_log_update_status(
     })?;
 
     Ok(())
+}
+
+/// 從 sync_log 讀取最終狀態，組裝 SyncState（供背景 task 回寫 Redis 用）
+pub async fn fetch_final_sync_state_from_db(
+    db_pool: &PgPool,
+    sync_id: &str,
+) -> Result<Option<SyncState>, BridgeError> {
+    use crate::models::enums::SymbolSyncStatus;
+    use crate::services::admin_sync::SyncSummary;
+
+    let row = sqlx::query!(
+        r#"
+        SELECT sync_id, symbols,
+               total_inserted, total_skipped, total_failed,
+               started_at_ms, status
+        FROM sync_log WHERE sync_id = $1
+        "#,
+        sync_id
+    )
+    .fetch_optional(db_pool)
+    .await
+    .map_err(|e| BridgeError::from_db("fetch_final_sync_state failed", e))?;
+
+    let row = match row {
+        None => return Ok(None),
+        Some(r) => r,
+    };
+
+    let status = match row.status.as_str() {
+        "running" => SyncStatus::Running,
+        "rate_limit_waiting" => SyncStatus::RateLimitWaiting,
+        "completed" => SyncStatus::Completed,
+        _ => SyncStatus::Failed,
+    };
+
+    let symbols = row.symbols;
+    let total = symbols.len();
+    let symbol_status = if status == SyncStatus::Completed {
+        SymbolSyncStatus::Completed
+    } else {
+        SymbolSyncStatus::Pending
+    };
+
+    let progress: Vec<SymbolProgress> = symbols
+        .iter()
+        .map(|s| SymbolProgress {
+            symbol: s.clone(),
+            name: String::new(),
+            status: symbol_status.clone(),
+            gap_a: None,
+            gap_b: None,
+        })
+        .collect();
+
+    Ok(Some(SyncState {
+        sync_id: row.sync_id,
+        status: status.clone(),
+        started_at_ms: row.started_at_ms,
+        symbols,
+        progress,
+        summary: SyncSummary {
+            total_symbols: total,
+            completed_symbols: if status == SyncStatus::Completed {
+                total
+            } else {
+                0
+            },
+            total_inserted: row.total_inserted,
+            total_skipped: row.total_skipped,
+            total_failed: row.total_failed,
+        },
+    }))
 }
