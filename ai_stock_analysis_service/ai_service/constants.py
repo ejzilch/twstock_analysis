@@ -1,5 +1,5 @@
 """
-All business constants for AI Bridge Python AI Service.
+All business constants for TW Stock Analysis Python AI Service.
 No hardcoded numeric values are allowed elsewhere — reference this file.
 """
 

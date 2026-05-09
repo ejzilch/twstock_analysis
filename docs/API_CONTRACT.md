@@ -1,4 +1,4 @@
-# AI Bridge - API Contract
+# TW Stock Analysis - API Contract
 
 版本: 2.2
 更新日期: 2026-04-11

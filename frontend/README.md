@@ -1,4 +1,4 @@
-# AI Bridge — Frontend
+# TW Stock Analysis — Frontend
 
 ## 技術棧
 - Next.js 14 (App Router)

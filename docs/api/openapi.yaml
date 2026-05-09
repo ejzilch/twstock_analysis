@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: AI Bridge API
+  title: TW Stock Analysis API
   description: |
     股票分析與 AI 交易信號系統 API。
     所有 timestamp 欄位為毫秒級 UTC integer（13 位）。

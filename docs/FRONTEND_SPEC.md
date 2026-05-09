@@ -1,4 +1,4 @@
-# AI Bridge - 前端規格
+# TW Stock Analysis - 前端規格
 
 版本: 1.0
 更新日期: 2026-04-11

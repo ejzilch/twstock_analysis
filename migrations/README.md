@@ -1,4 +1,4 @@
-# AI Bridge — DB Migrations
+# TW Stock Analysis — DB Migrations
 
 ## 目錄結構
 

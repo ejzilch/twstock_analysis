@@ -1,5 +1,5 @@
 """
-Test suite for AI Bridge Python AI Service.
+Test suite for TW Stock Analysis Python AI Service.
 Run: pytest tests/ -v
 """
 import math

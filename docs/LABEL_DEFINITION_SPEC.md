@@ -10,7 +10,7 @@
 
 ## 決策背景與目的
 
-本文件定義 AI Bridge XGBoost 模型的訓練標記規則（Label Definition），確保 Python AI Service 的訓練資料具備一致性與實際交易價值。所有參數均已由 EJ (PM) 於 2026-04-16 正式確認。
+本文件定義 TW Stock Analysis XGBoost 模型的訓練標記規則（Label Definition），確保 Python AI Service 的訓練資料具備一致性與實際交易價值。所有參數均已由 EJ (PM) 於 2026-04-16 正式確認。
 
 標記定義是訓練 Pipeline 的最上游輸入，一旦確認後變更將影響所有下游產出（特徵工程、模型訓練、回測驗證），任何修改必須重新經過 EJ 簽核並觸發完整重訓流程。
 
