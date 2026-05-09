@@ -1,5 +1,3 @@
-use anyhow::Ok;
-
 /// BacktestService — 回測業務流程協調者（Service layer）
 ///
 /// 職責：
@@ -10,8 +8,11 @@ use anyhow::Ok;
 ///
 /// handler 只需呼叫 `BacktestService::run()`，不再包含任何業務邏輯。
 use crate::app_state::AppState;
+use crate::data::candle_query::fetch_candles_for_backtest;
 use crate::domain::backtest::engine::{run as engine_run, BacktestInput, BacktestOutput};
-use crate::models::candle::CandleRow;
+use crate::models::{candle::CandleRow, Interval};
+
+use anyhow::Ok;
 
 // service 層 model
 pub struct BacktestParams {
@@ -82,24 +83,14 @@ impl BacktestService {
         state: &AppState,
         params: &BacktestParams,
     ) -> Result<Vec<CandleRow>, anyhow::Error> {
-        let candles = sqlx::query_as::<_, CandleRow>(
-            r#"
-            SELECT timestamp_ms, close
-            FROM candles
-            WHERE symbol = $1
-              AND interval = '1d'
-              AND timestamp_ms >= $2
-              AND timestamp_ms <= $3
-            ORDER BY timestamp_ms ASC
-            "#,
+        fetch_candles_for_backtest(
+            &state.db_pool,
+            &params.symbol,
+            Interval::OneDay,
+            params.from_ms,
+            params.to_ms,
         )
-        .bind(&params.symbol)
-        .bind(params.from_ms)
-        .bind(params.to_ms)
-        .fetch_all(&state.db_pool)
         .await
-        .map_err(|e| anyhow::anyhow!("Backtest candle query failed: {e}"))?;
-
-        Ok(candles)
+        .map_err(|e| anyhow::anyhow!("Backtest candle query failed: {e}"))
     }
 }

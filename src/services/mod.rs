@@ -12,3 +12,4 @@ pub mod candle;
 pub mod scheduler;
 pub mod signal;
 pub mod sync_state;
+pub mod sync_types;
