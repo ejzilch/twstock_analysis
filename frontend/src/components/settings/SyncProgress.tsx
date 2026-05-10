@@ -3,7 +3,8 @@
  * src/components/settings/SyncProgress.tsx
  *
  * 同步執行中的進度顯示元件。
- * 顯示 API 使用量、各股票進度、rate limit 等待狀態。
+ * 已完成（completed / failed / skipped）的 symbol 從列表移除，
+ * header 顯示「剩餘 N / 共 M 檔」。
  */
 import { useState, useEffect } from 'react'
 import { clsx } from 'clsx'
@@ -14,11 +15,19 @@ interface SyncProgressProps {
   rateLimit: RateLimitInfo
 }
 
+const DONE_STATUSES: SymbolSyncStatus[] = ['completed', 'failed', 'skipped']
+
 export function SyncProgress({ progress, rateLimit }: SyncProgressProps) {
   const [collapsed, setCollapsed] = useState(false)
 
   const usedPct = Math.round((rateLimit.used_this_hour / rateLimit.limit_per_hour) * 100)
   const remaining = Math.max(rateLimit.used_this_hour, 0)
+
+  const total = progress.length
+  const done = progress.filter((p) => DONE_STATUSES.includes(p.status))
+  const remaining_symbols = progress.filter((p) => !DONE_STATUSES.includes(p.status))
+  const doneCount = done.length
+  const remainingCount = remaining_symbols.length
 
   return (
     <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
@@ -27,6 +36,15 @@ export function SyncProgress({ progress, rateLimit }: SyncProgressProps) {
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-brand-400 animate-pulse" />
           <span className="text-sm font-medium text-slate-200">同步執行中</span>
+          {total > 0 && (
+            <span className="text-xs text-slate-500">
+              — 已完成 <span className="text-slate-300 font-mono">{doneCount}</span>
+              {' '}/ 共 <span className="text-slate-300 font-mono">{total}</span> 檔
+              {remainingCount > 0 && (
+                <>，剩餘 <span className="text-brand-300 font-mono">{remainingCount}</span> 檔</>
+              )}
+            </span>
+          )}
         </div>
         <button
           onClick={() => setCollapsed((c) => !c)}
@@ -67,12 +85,26 @@ export function SyncProgress({ progress, rateLimit }: SyncProgressProps) {
             <RateLimitWaitBanner resumeAtMs={rateLimit.resume_at_ms} />
           )}
 
-          {/* Per-symbol progress */}
-          <div className="flex flex-col gap-3">
-            {progress.map((p) => (
-              <SymbolProgressRow key={p.symbol} progress={p} />
-            ))}
-          </div>
+          {/* 已完成摘要（只顯示計數，不展開明細） */}
+          {doneCount > 0 && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/5 border border-emerald-500/15 text-xs text-slate-500">
+              <span className="text-emerald-400">✓</span>
+              已完成 {doneCount} 檔，明細將於同步結束後顯示
+            </div>
+          )}
+
+          {/* 進行中 / 等待中的 symbol 列表 */}
+          {remainingCount > 0 ? (
+            <div className="flex flex-col gap-3">
+              {remaining_symbols.map((p) => (
+                <SymbolProgressRow key={p.symbol} progress={p} />
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-600 text-center py-2">
+              所有股票均已處理完成，等待最終狀態確認…
+            </p>
+          )}
 
           {/* Warning */}
           {!rateLimit.is_waiting && (

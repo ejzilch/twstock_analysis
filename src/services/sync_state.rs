@@ -101,8 +101,6 @@ fn cancel_key(sync_id: &str) -> String {
 }
 
 // ── Async Redis 操作 ──────────────────────────────────────────────────────────
-// AppState.redis_client 型別為 MultiplexedConnection（已連線），
-// 直接 clone() 取得副本使用，不需再 get_connection()。
 
 /// 將 SyncState 寫入 Redis，TTL 24 小時。
 pub async fn save_sync_state(
@@ -163,8 +161,6 @@ pub async fn find_running_sync(
 ) -> Result<Option<SyncState>, BridgeError> {
     let pattern = format!("{}:*", REDIS_SYNC_KEY_PREFIX);
 
-    // KEYS 在生產環境會阻塞 Redis，此處資料量小（同時最多 1 個 sync）可接受
-    // 若未來 sync 頻繁，改用 SCAN 迭代
     let keys: Vec<String> = redis.keys(&pattern).await.map_err(|e| {
         warn!(error = %e, "Failed to scan Redis for running sync");
         BridgeError::from_cache("find_running_sync keys failed", e)
@@ -196,6 +192,59 @@ pub async fn update_sync_status(
     Ok(())
 }
 
+// ── 新增：逐 symbol 進度更新 ──────────────────────────────────────────────────
+
+/// 更新單一 symbol 的同步進度並回寫 Redis。
+///
+/// 每個 symbol 的所有 gap 處理完後呼叫一次，不是每個 batch 呼叫，
+/// 避免過於頻繁的 Redis 寫入。
+///
+/// # Arguments
+/// * `symbol`  - 股票代號
+/// * `status`  - 該 symbol 的新狀態（running / completed / failed）
+/// * `gap_a`   - 歷史段結果，None 表示無此缺口
+/// * `gap_b`   - 近期段結果，None 表示無此缺口
+pub async fn update_symbol_progress(
+    redis: &mut MultiplexedConnection,
+    sync_id: &str,
+    symbol: &str,
+    status: SymbolSyncStatus,
+    gap_a: Option<GapProgress>,
+    gap_b: Option<GapProgress>,
+) -> Result<(), BridgeError> {
+    let mut state = match load_sync_state(redis, sync_id).await? {
+        Some(s) => s,
+        None => {
+            warn!(sync_id = %sync_id, symbol = %symbol, "SyncState not found in Redis, skip update");
+            return Ok(());
+        }
+    };
+
+    if let Some(p) = state.progress.iter_mut().find(|p| p.symbol == symbol) {
+        p.status = status.clone();
+        if gap_a.is_some() {
+            p.gap_a = gap_a;
+        }
+        if gap_b.is_some() {
+            p.gap_b = gap_b;
+        }
+    }
+
+    // 同步更新 summary 的 completed_symbols 計數
+    state.summary.completed_symbols = state
+        .progress
+        .iter()
+        .filter(|p| {
+            matches!(
+                p.status,
+                SymbolSyncStatus::Completed | SymbolSyncStatus::Failed | SymbolSyncStatus::Skipped
+            )
+        })
+        .count();
+
+    save_sync_state(redis, &state).await
+}
+
 /// 設定取消旗標，讓背景同步流程在下一個批次安全停止。
 pub async fn request_sync_cancel(
     redis: &mut MultiplexedConnection,
@@ -208,7 +257,7 @@ pub async fn request_sync_cancel(
         .map_err(|e| BridgeError::from_cache("request_sync_cancel failed", e))
 }
 
-/// 強制清除同步狀態與取消旗標，避免殘留狀態阻擋後續啟動。
+/// 強制清除同步狀態與取消旗標。
 pub async fn clear_sync_state(
     redis: &mut MultiplexedConnection,
     sync_id: &str,
