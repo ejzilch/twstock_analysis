@@ -64,12 +64,14 @@ struct FinMindStockInfoRow {
     stock_name: String,
     #[serde(rename = "type")]
     stock_type: String,
+    date: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct StockInfo {
     pub name: String,
     pub exchange: Exchange,
+    pub is_active: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -356,11 +358,14 @@ pub async fn fetch_stock_info_map(
                 _ => return None,
             };
 
+            let today = chrono::Utc::now().format(FINMIND_DATE_FORMAT).to_string();
+
             Some((
                 row.stock_id.clone(),
                 StockInfo {
                     name: row.stock_name,
                     exchange,
+                    is_active: row.date.as_deref() == Some(&today),
                 },
             ))
         })

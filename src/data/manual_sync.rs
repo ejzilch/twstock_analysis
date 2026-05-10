@@ -4,25 +4,25 @@
 ///   1. detect_gaps()    — 查 DB MIN/MAX，計算缺口 A（歷史段）和缺口 B（近期段）
 ///   2. fetch_and_insert_gap() — 對缺口分批請求 FinMind，INSERT ON CONFLICT DO NOTHING
 ///   3. RateLimitQueue   — 由 FinMindRateLimiter.acquire() 管理，達上限自動等待
-///
-/// 設計原則：
-///   - 先查 DB 確認缺口，再打 FinMind API，不浪費請求配額
-///   - 每批請求一個月的資料，控制單次請求大小
-///   - 排程與手動同步共用 FinMindRateLimiter 實例
-///   - Redis 連線由呼叫端（AppState）統一管理，不在此自行建立
 use crate::constants::{
-    FINMIND_API_TOKEN_ENV, MANUAL_SYNC_BATCH_DAYS, REDIS_TRADING_DATES_KEY,
+    FINMIND_API_TOKEN_ENV, FINMIND_DATE_FORMAT, MANUAL_SYNC_BATCH_DAYS, REDIS_TRADING_DATES_KEY,
     REDIS_TRADING_DATES_TTL_SECS,
 };
 use crate::data::db::{sync_log_update_counts, sync_log_update_status, BulkInsertBuffer};
-use crate::data::fetch::{fetch_range, fetch_stock_info_map, fetch_trading_dates};
+use crate::data::fetch::{fetch_range, fetch_trading_dates};
 use crate::data::fetch_rate_limiter::{FinMindRateLimiter, SyncProgress};
 use crate::data::implementations::{PostgresDbWriter, RedisInvalidator};
 use crate::data::models::current_timestamp_ms;
-use crate::data::symbol_sync::{get_finmind_earliest_ms, upsert_symbols, SymbolSyncData};
+use crate::data::symbol_sync::{
+    fetch_active_symbols, get_finmind_earliest_ms, refresh_symbols_from_finmind,
+};
 use crate::domain::BridgeError;
-use crate::models::enums::{DataSource, Exchange, Interval, SyncStatus};
-use crate::services::sync_state::{is_sync_cancel_requested, update_sync_status};
+use crate::models::enums::{Interval, SymbolFetchScope, SymbolSyncStatus, SyncStatus};
+use crate::services::sync_state::{
+    is_sync_cancel_requested, update_symbol_progress, update_sync_status,
+};
+use crate::services::sync_types::GapProgress;
+
 use chrono::{Datelike, Duration, NaiveDate, Utc};
 use redis::{aio::MultiplexedConnection, AsyncCommands};
 use reqwest::Client;
@@ -30,7 +30,7 @@ use sqlx::PgPool;
 use std::{collections::HashSet, sync::Arc, time::Instant};
 use tracing::{error, info, warn};
 
-// ── 所有支援的 K 線粒度（手動同步全部補齊）────────────────────────────────────
+// ── 所有支援的 K 線粒度 ────────────────────────────────────────────────────────
 
 const ALL_INTERVALS: &[Interval] = &[Interval::OneDay];
 
@@ -44,20 +44,15 @@ pub struct SyncScope {
 
 // ── 缺口定義 ──────────────────────────────────────────────────────────────────
 
-/// 單一股票、單一粒度的缺口資訊。
 #[derive(Debug, Clone)]
 pub struct GapInfo {
     pub symbol: String,
     pub interval: Interval,
-    /// 缺口 A（歷史段）：FinMind 最早 ~ DB 最舊 - 1 天
     pub gap_a: Option<DateRange>,
-    /// 缺口 B（近期段）：DB 最新 + 1 天 ~ 今天
     pub gap_b: Option<DateRange>,
-    /// 缺口 C（區間內部）：DB 內部斷點造成的缺值（精準到連續區段）
     pub gap_internal: Vec<DateRange>,
 }
 
-/// 日期範圍（含頭含尾）。
 #[derive(Debug, Clone)]
 pub struct DateRange {
     pub from_date: NaiveDate,
@@ -65,7 +60,6 @@ pub struct DateRange {
 }
 
 impl DateRange {
-    /// 依 MANUAL_SYNC_BATCH_DAYS 切分為多個批次。
     pub fn into_monthly_batches(self) -> Vec<DateRange> {
         let mut batches = Vec::new();
         let mut current = self.from_date;
@@ -86,7 +80,6 @@ impl DateRange {
 
 // ── detect_gaps ───────────────────────────────────────────────────────────────
 
-/// 查詢 DB，計算指定股票清單的所有缺口。
 pub async fn detect_gaps(
     db_pool: &PgPool,
     symbols: &[String],
@@ -135,7 +128,6 @@ pub async fn detect_gaps(
     Ok(gaps)
 }
 
-/// 針對單一股票 + 粒度計算缺口。
 async fn detect_gap_for_interval(
     db_pool: &PgPool,
     symbol: &str,
@@ -332,7 +324,6 @@ fn has_trading_day_in_range(
 
 // ── fetch_and_insert_gap ──────────────────────────────────────────────────────
 
-/// 對單一缺口分批請求 FinMind 並寫入 DB。
 pub async fn fetch_and_insert_gap(
     db_pool: &PgPool,
     http_client: &Client,
@@ -343,7 +334,6 @@ pub async fn fetch_and_insert_gap(
     gap_info: &GapInfo,
     gap: &DateRange,
 ) -> Result<(i32, i32, i32), BridgeError> {
-    // 問題查找
     let gap_started = Instant::now();
 
     let api_token = std::env::var(FINMIND_API_TOKEN_ENV).unwrap_or_default();
@@ -369,7 +359,6 @@ pub async fn fetch_and_insert_gap(
     let mut invalidator = RedisInvalidator::new(redis.clone());
 
     for (i, batch) in batches.iter().enumerate() {
-        // 問題查找
         let batch_started = Instant::now();
 
         if is_sync_cancel_requested(redis, sync_id)
@@ -497,14 +486,11 @@ pub async fn fetch_and_insert_gap(
 
 // ── run_manual_sync（對外入口）────────────────────────────────────────────────
 
-/// 手動同步主流程，由 admin_sync service 在背景 task 中呼叫。
-///
-/// Redis 連線由呼叫端從 AppState 取得後傳入，不在此自行建立。
 pub async fn run_manual_sync(
     db_pool: PgPool,
     http_client: Client,
     rate_limiter: Arc<FinMindRateLimiter>,
-    mut redis_conn: MultiplexedConnection, // ← 由呼叫端傳入，不再自己 open
+    mut redis_conn: MultiplexedConnection,
     sync_id: String,
     symbols: Vec<String>,
     scope: SyncScope,
@@ -514,8 +500,13 @@ pub async fn run_manual_sync(
 
     let mut buffer = buffer.lock().await;
 
-    if let Err(e) =
-        ensure_symbols_metadata(&db_pool, &http_client, &rate_limiter, &symbols, &sync_id).await
+    if let Err(e) = refresh_symbols_from_finmind(
+        &db_pool,
+        &http_client,
+        &rate_limiter,
+        SymbolFetchScope::MissingOnly(&symbols),
+    )
+    .await
     {
         warn!(
             error = %e,
@@ -534,8 +525,38 @@ pub async fn run_manual_sync(
         }
     };
 
+    // 從 DB 確認哪些是 is_active = true
+    let active_symbols = match fetch_active_symbols(&db_pool, Some(&symbols)).await {
+        Ok(s) => s,
+        Err(e) => {
+            error!(error = %e, sync_id = %sync_id, "Failed to fetch active symbols");
+            let _ = sync_log_update_status(
+                &db_pool,
+                &sync_id,
+                SyncStatus::Failed.as_str(),
+                Some(current_timestamp_ms()),
+            )
+            .await;
+            return;
+        }
+    };
+
+    let skipped: Vec<&String> = symbols
+        .iter()
+        .filter(|s| !active_symbols.contains(s))
+        .collect();
+
+    if !skipped.is_empty() {
+        warn!(
+            sync_id  = %sync_id,
+            symbols  = ?skipped,
+            count    = skipped.len(),
+            "Delisted symbols excluded from sync"
+        );
+    }
+
     // Step 1: 偵測所有缺口
-    let gaps = match detect_gaps(&db_pool, &symbols, &scope, &trading_dates).await {
+    let gaps = match detect_gaps(&db_pool, &active_symbols, &scope, &trading_dates).await {
         Ok(g) => g,
         Err(e) => {
             error!(error = %e, sync_id = %sync_id, "detect_gaps failed");
@@ -554,9 +575,26 @@ pub async fn run_manual_sync(
     let mut total_failed_batches = 0i32;
 
     // Step 2: 對每個缺口執行補資料
+    // gaps 以 symbol 為單位分組（目前每個 symbol 只有一個 interval，所以一對一）
     for gap_info in &gaps {
+        // ── symbol 開始：標記為 running ──────────────────────────────────────
+        let _ = update_symbol_progress(
+            &mut redis_conn,
+            &sync_id,
+            &gap_info.symbol,
+            SymbolSyncStatus::Running,
+            None,
+            None,
+        )
+        .await;
+
+        let mut symbol_failed = false;
+        let mut result_gap_a: Option<GapProgress> = None;
+        let mut result_gap_b: Option<GapProgress> = None;
+
+        // ── gap_a ─────────────────────────────────────────────────────────────
         if let Some(ref gap_a) = gap_info.gap_a {
-            let result = fetch_and_insert_gap(
+            match fetch_and_insert_gap(
                 &db_pool,
                 &http_client,
                 &rate_limiter,
@@ -566,12 +604,32 @@ pub async fn run_manual_sync(
                 gap_info,
                 gap_a,
             )
-            .await;
-
-            match result {
-                Ok((_, _, failed)) => total_failed_batches += failed,
+            .await
+            {
+                Ok((inserted, skipped, failed)) => {
+                    total_failed_batches += failed;
+                    result_gap_a = Some(GapProgress {
+                        from_ms: gap_a
+                            .from_date
+                            .and_hms_opt(0, 0, 0)
+                            .unwrap()
+                            .and_utc()
+                            .timestamp_millis(),
+                        to_ms: gap_a
+                            .to_date
+                            .and_hms_opt(0, 0, 0)
+                            .unwrap()
+                            .and_utc()
+                            .timestamp_millis(),
+                        inserted,
+                        skipped,
+                        failed,
+                        completed: failed == 0,
+                    });
+                }
                 Err(e) => {
                     has_gap_error = true;
+                    symbol_failed = true;
                     error!(
                         error   = %e,
                         sync_id = %sync_id,
@@ -582,8 +640,9 @@ pub async fn run_manual_sync(
             }
         }
 
+        // ── gap_b ─────────────────────────────────────────────────────────────
         if let Some(ref gap_b) = gap_info.gap_b {
-            let result = fetch_and_insert_gap(
+            match fetch_and_insert_gap(
                 &db_pool,
                 &http_client,
                 &rate_limiter,
@@ -593,12 +652,32 @@ pub async fn run_manual_sync(
                 gap_info,
                 gap_b,
             )
-            .await;
-
-            match result {
-                Ok((_, _, failed)) => total_failed_batches += failed,
+            .await
+            {
+                Ok((inserted, skipped, failed)) => {
+                    total_failed_batches += failed;
+                    result_gap_b = Some(GapProgress {
+                        from_ms: gap_b
+                            .from_date
+                            .and_hms_opt(0, 0, 0)
+                            .unwrap()
+                            .and_utc()
+                            .timestamp_millis(),
+                        to_ms: gap_b
+                            .to_date
+                            .and_hms_opt(0, 0, 0)
+                            .unwrap()
+                            .and_utc()
+                            .timestamp_millis(),
+                        inserted,
+                        skipped,
+                        failed,
+                        completed: failed == 0,
+                    });
+                }
                 Err(e) => {
                     has_gap_error = true;
+                    symbol_failed = true;
                     error!(
                         error   = %e,
                         sync_id = %sync_id,
@@ -609,8 +688,9 @@ pub async fn run_manual_sync(
             }
         }
 
+        // ── gap_internal（不回寫個別進度，只累計失敗數）──────────────────────
         for gap_internal in &gap_info.gap_internal {
-            let result = fetch_and_insert_gap(
+            match fetch_and_insert_gap(
                 &db_pool,
                 &http_client,
                 &rate_limiter,
@@ -620,12 +700,12 @@ pub async fn run_manual_sync(
                 gap_info,
                 gap_internal,
             )
-            .await;
-
-            match result {
+            .await
+            {
                 Ok((_, _, failed)) => total_failed_batches += failed,
                 Err(e) => {
                     has_gap_error = true;
+                    symbol_failed = true;
                     error!(
                         error   = %e,
                         sync_id = %sync_id,
@@ -635,6 +715,23 @@ pub async fn run_manual_sync(
                 }
             }
         }
+
+        // ── symbol 完成：回寫最終狀態到 Redis ────────────────────────────────
+        let symbol_status = if symbol_failed {
+            SymbolSyncStatus::Failed
+        } else {
+            SymbolSyncStatus::Completed
+        };
+
+        let _ = update_symbol_progress(
+            &mut redis_conn,
+            &sync_id,
+            &gap_info.symbol,
+            symbol_status,
+            result_gap_a,
+            result_gap_b,
+        )
+        .await;
     }
 
     // Step 3: 依執行結果標記最終狀態
@@ -665,77 +762,6 @@ fn ms_to_naive_date(ms: i64) -> NaiveDate {
         .date_naive()
 }
 
-async fn ensure_symbols_metadata(
-    db_pool: &PgPool,
-    http_client: &Client,
-    rate_limiter: &Arc<FinMindRateLimiter>,
-    symbols: &[String],
-    sync_id: &str,
-) -> Result<(), BridgeError> {
-    if symbols.is_empty() {
-        return Ok(());
-    }
-
-    // 先查 DB，過濾掉已有 metadata 的 symbol
-    let existing: HashSet<String> = sqlx::query_scalar!(
-        "SELECT symbol FROM symbols WHERE symbol = ANY($1) AND name IS NOT NULL",
-        &symbols as &[String]
-    )
-    .fetch_all(db_pool)
-    .await
-    .map_err(|e| BridgeError::from_db("ensure_symbols_metadata: query existing symbols failed", e))?
-    .into_iter()
-    .collect();
-
-    let missing: Vec<String> = symbols
-        .iter()
-        .filter(|s| !existing.contains(*s))
-        .cloned()
-        .collect();
-
-    // 省掉一次 TaiwanStockInfo 請求
-    if missing.is_empty() {
-        return Ok(());
-    }
-
-    let api_token = std::env::var(FINMIND_API_TOKEN_ENV).unwrap_or_default();
-
-    rate_limiter.acquire().await.ok();
-    let stock_info_map = fetch_stock_info_map(http_client, &api_token).await?;
-    rate_limiter.mark_request_used().await;
-
-    // 只 upsert 真正缺失的 symbol
-    let now_ms = current_timestamp_ms();
-    let upsert_payload: Vec<SymbolSyncData> = missing
-        .iter()
-        .map(|symbol| {
-            let info = stock_info_map.get(symbol);
-            SymbolSyncData {
-                symbol: symbol.clone(),
-                name: info
-                    .map(|s| s.name.clone())
-                    .unwrap_or_else(|| format!("股票 {}", symbol)),
-                exchange: info.map(|s| s.exchange).unwrap_or(Exchange::Twse),
-                data_source: DataSource::FinMind,
-                finmind_earliest_ms: None,
-                latest_ms: now_ms,
-                is_active: true,
-            }
-        })
-        .collect();
-
-    let summary = upsert_symbols(db_pool, &upsert_payload, now_ms).await?;
-    info!(
-        sync_id = %sync_id,
-        inserted = summary.inserted,
-        updated = summary.updated,
-        failed = summary.failed,
-        "Manual sync metadata upsert completed"
-    );
-
-    Ok(())
-}
-
 async fn load_trading_dates_5y(
     http_client: &Client,
     rate_limiter: &Arc<FinMindRateLimiter>,
@@ -746,7 +772,7 @@ async fn load_trading_dates_5y(
         if let Ok(days) = serde_json::from_str::<Vec<String>>(&raw) {
             let parsed: HashSet<NaiveDate> = days
                 .into_iter()
-                .filter_map(|d| NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
+                .filter_map(|d| NaiveDate::parse_from_str(&d, FINMIND_DATE_FORMAT).ok())
                 .collect();
             if !parsed.is_empty() {
                 return Ok(parsed);
@@ -765,8 +791,8 @@ async fn load_trading_dates_5y(
     let fetched = fetch_trading_dates(
         http_client,
         &api_token,
-        &start.format("%Y-%m-%d").to_string(),
-        &end.format("%Y-%m-%d").to_string(),
+        &start.format(FINMIND_DATE_FORMAT).to_string(),
+        &end.format(FINMIND_DATE_FORMAT).to_string(),
     )
     .await?;
     rate_limiter.mark_request_used().await;
@@ -774,7 +800,7 @@ async fn load_trading_dates_5y(
     if !fetched.is_empty() {
         let mut vec_days: Vec<String> = fetched
             .iter()
-            .map(|d| d.format("%Y-%m-%d").to_string())
+            .map(|d| d.format(FINMIND_DATE_FORMAT).to_string())
             .collect();
         vec_days.sort();
         if let Ok(payload) = serde_json::to_string(&vec_days) {

@@ -234,6 +234,15 @@ pub enum SymbolSyncStatus {
     Skipped,
 }
 
+#[derive(Debug)]
+/// symbols 同步範圍
+pub enum SymbolFetchScope<'a> {
+    /// 全市場，全量 upsert（排程用）
+    AllMarkets,
+    /// 指定清單，只補 DB 中缺失的（手動同步用）
+    MissingOnly(&'a [String]),
+}
+
 // ── 單元測試 ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

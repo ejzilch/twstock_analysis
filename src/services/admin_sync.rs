@@ -9,7 +9,9 @@
 ///
 /// admin_sync handler 只做 parse → call service → return response。
 use crate::app_state::AppState;
-use crate::constants::{FINMIND_RATE_LIMIT_BUFFER, FINMIND_RATE_LIMIT_PER_HOUR};
+use crate::constants::{
+    FINMIND_DATE_FORMAT, FINMIND_RATE_LIMIT_BUFFER, FINMIND_RATE_LIMIT_PER_HOUR,
+};
 use crate::data::db::{sync_log_create, SyncLogEntry};
 use crate::data::fetch_rate_limiter::FinMindRateLimiter;
 use crate::data::manual_sync::{run_manual_sync, SyncScope};
@@ -211,7 +213,7 @@ impl SyncService {
         let from = req
             .from_date
             .as_deref()
-            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+            .and_then(|s| NaiveDate::parse_from_str(s, FINMIND_DATE_FORMAT).ok())
             .ok_or_else(|| {
                 SyncServiceError::InvalidRequest(
                     "from_date is required in custom mode (YYYY-MM-DD)".to_string(),
@@ -221,7 +223,7 @@ impl SyncService {
         let to = req
             .to_date
             .as_deref()
-            .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+            .and_then(|s| NaiveDate::parse_from_str(s, FINMIND_DATE_FORMAT).ok())
             .ok_or_else(|| {
                 SyncServiceError::InvalidRequest(
                     "to_date is required in custom mode (YYYY-MM-DD)".to_string(),
