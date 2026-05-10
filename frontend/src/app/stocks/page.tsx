@@ -1,4 +1,5 @@
 'use client'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSymbols } from '@/src/hooks'
 import { StockTable } from '@/src/components/stocks'
@@ -6,7 +7,13 @@ import { LoadingSpinner, ErrorToast } from '@/src/components/ui'
 
 export default function StocksPage() {
     const router = useRouter()
-    const { data, isLoading, isError, error, refetch } = useSymbols()
+    // includeInactive 由 StockTable 內部的 toggle 控制顯示，
+    // 但 fetch 需要在此層提前決定——因為 StockTable 目前收 symbols prop。
+    // 方案：讓 StockTable 自己持有 includeInactive state 並通知此層，
+    // 或是提升 state 到此層。這裡選擇提升，讓 fetch 跟著 toggle 走。
+    const [includeInactive, setIncludeInactive] = useState(false)
+
+    const { data, isLoading, isError, error, refetch } = useSymbols({ includeInactive })
 
     return (
         <div className="flex flex-col h-full">
@@ -40,7 +47,13 @@ export default function StocksPage() {
                     </>
                 )}
 
-                {data && <StockTable symbols={data.symbols} />}
+                {data && (
+                    <StockTable
+                        symbols={data.symbols}
+                        includeInactive={includeInactive}
+                        onToggleInactive={() => setIncludeInactive((v) => !v)}
+                    />
+                )}
             </div>
         </div>
     )
