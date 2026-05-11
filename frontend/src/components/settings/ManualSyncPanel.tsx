@@ -23,7 +23,7 @@ import { SyncResult } from './SyncResult'
 import type { SymbolItem } from '@/src/types/api.types'
 import { useQueryClient } from '@tanstack/react-query'
 
-// 前 10 大市值股票代號（由 EJ 於 04-25 確認後更新）
+// 前 10 大市值股票代號
 const TOP_10_SYMBOLS = [
   '2330', '2317', '2454', '2412',
   '2308', '2382', '2881', '2882',

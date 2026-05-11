@@ -23,6 +23,9 @@ pub const BULK_INSERT_MAX_WAIT_MS: u64 = 1_000;
 
 // ── FinMind API ───────────────────────────────────────────────────────────────
 
+/// FinMind 免費版單次回傳上限約 5000 筆
+pub const FINMIND_ROW_LIMIT: usize = 4988;
+
 /// FinMind API 回傳的日期字串格式
 pub const FINMIND_DATE_FORMAT: &str = "%Y-%m-%d";
 
@@ -39,8 +42,8 @@ pub const FINMIND_API_TIMEOUT_SECS: u64 = 30;
 pub const FINMIND_RATE_LIMIT_PER_HOUR: u32 = 600;
 
 /// Rate limit 安全緩衝：保留 3 次，避免邊界誤差
-/// 實際觸發等待的閾值為：FINMIND_RATE_LIMIT_PER_HOUR - FINMIND_RATE_LIMIT_BUFFER = 597
-pub const FINMIND_RATE_LIMIT_BUFFER: u32 = 3;
+/// 實際觸發等待的閾值為：FINMIND_RATE_LIMIT_PER_HOUR - FINMIND_RATE_LIMIT_BUFFER = 598
+pub const FINMIND_RATE_LIMIT_BUFFER: u32 = 2;
 
 /// 達到每小時上限後，額外延遲秒數（避免供應商用量統計有延遲）
 pub const FINMIND_RATE_LIMIT_RESUME_DELAY_SECS: u64 = 45;
