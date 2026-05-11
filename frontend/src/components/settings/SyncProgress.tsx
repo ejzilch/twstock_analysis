@@ -135,7 +135,7 @@ function RateLimitWaitBanner({ resumeAtMs }: { resumeAtMs: number }) {
     <div className="flex items-center gap-2 px-3 py-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-400">
       <span className="text-base">⏳</span>
       <div>
-        <div className="font-medium">達到 FinMind 每小時上限（597 / 600 次）</div>
+        <div className="font-medium">達到 FinMind 每小時上限（598 / 600 次）</div>
         <div className="opacity-80 mt-0.5">
           將於 <span className="font-mono font-medium">{remaining}</span> 後自動繼續，無需任何操作
         </div>

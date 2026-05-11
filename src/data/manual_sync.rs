@@ -5,8 +5,8 @@
 ///   2. fetch_and_insert_gap() — 對缺口分批請求 FinMind，INSERT ON CONFLICT DO NOTHING
 ///   3. RateLimitQueue   — 由 FinMindRateLimiter.acquire() 管理，達上限自動等待
 use crate::constants::{
-    FINMIND_API_TOKEN_ENV, FINMIND_DATE_FORMAT, MANUAL_SYNC_BATCH_DAYS, REDIS_TRADING_DATES_KEY,
-    REDIS_TRADING_DATES_TTL_SECS,
+    FINMIND_API_TOKEN_ENV, FINMIND_DATE_FORMAT, FINMIND_ROW_LIMIT, MANUAL_SYNC_BATCH_DAYS,
+    REDIS_TRADING_DATES_KEY, REDIS_TRADING_DATES_TTL_SECS,
 };
 use crate::data::db::{sync_log_update_counts, sync_log_update_status, BulkInsertBuffer};
 use crate::data::fetch::{fetch_range, fetch_trading_dates};
@@ -204,7 +204,7 @@ async fn detect_gap_for_interval(
 
             let gap_a = if range_start < db_oldest {
                 let to = (db_oldest - Duration::days(1)).min(range_end);
-                if range_start <= to {
+                if range_start <= to && has_trading_day_in_range(trading_dates, range_start, to) {
                     Some(DateRange {
                         from_date: range_start,
                         to_date: to,
@@ -218,10 +218,14 @@ async fn detect_gap_for_interval(
 
             let gap_b = if db_newest < range_end {
                 let from = (db_newest + Duration::days(1)).max(range_start);
-                Some(DateRange {
-                    from_date: from,
-                    to_date: range_end,
-                })
+                if has_trading_day_in_range(trading_dates, from, range_end) {
+                    Some(DateRange {
+                        from_date: from,
+                        to_date: range_end,
+                    })
+                } else {
+                    None
+                }
             } else {
                 None
             };
@@ -324,6 +328,8 @@ fn has_trading_day_in_range(
 
 // ── fetch_and_insert_gap ──────────────────────────────────────────────────────
 
+// ── fetch_and_insert_gap ──────────────────────────────────────────────────────
+
 pub async fn fetch_and_insert_gap(
     db_pool: &PgPool,
     http_client: &Client,
@@ -335,28 +341,199 @@ pub async fn fetch_and_insert_gap(
     gap: &DateRange,
 ) -> Result<(i32, i32, i32), BridgeError> {
     let gap_started = Instant::now();
-
     let api_token = std::env::var(FINMIND_API_TOKEN_ENV).unwrap_or_default();
-
-    let batches = gap.clone().into_monthly_batches();
-    let total_batches = batches.len();
-    let mut total_failed = 0i32;
+    let writer = PostgresDbWriter::new(db_pool.clone());
+    let mut invalidator = RedisInvalidator::new(redis.clone());
 
     let initial_inserted = buffer.total_inserted();
     let initial_skipped = buffer.total_skipped();
 
     info!(
-        sync_id    = %sync_id,
-        symbol     = %gap_info.symbol,
-        interval   = %gap_info.interval.as_str(),
-        from_date  = %gap.from_date,
-        to_date    = %gap.to_date,
-        batches    = total_batches,
-        "Starting gap fetch"
+        sync_id   = %sync_id,
+        symbol    = %gap_info.symbol,
+        interval  = %gap_info.interval.as_str(),
+        from_date = %gap.from_date,
+        to_date   = %gap.to_date,
+        "Starting gap fetch (single-request mode)"
     );
 
+    // ── 取消檢查 ──────────────────────────────────────────────────────────────
+    if is_sync_cancel_requested(redis, sync_id)
+        .await
+        .unwrap_or(false)
+    {
+        warn!(sync_id = %sync_id, symbol = %gap_info.symbol, "Sync cancel requested, stopping");
+        return Err(BridgeError::internal("SYNC_CANCELLED"));
+    }
+
+    // ── 記錄進度 ──────────────────────────────────────────────────────────────
+    rate_limiter
+        .record_progress(SyncProgress {
+            current_symbol: gap_info.symbol.clone(),
+            current_interval: gap_info.interval.as_str().to_string(),
+            current_date: gap.from_date.to_string(),
+        })
+        .await;
+
+    // ── Rate limit 狀態更新 ───────────────────────────────────────────────────
+    if let Some(resume_at_ms) = rate_limiter.predicted_resume_at_ms().await {
+        let _ = update_sync_status(redis, sync_id, SyncStatus::RateLimitWaiting).await;
+        info!(
+            sync_id      = %sync_id,
+            symbol       = %gap_info.symbol,
+            resume_at_ms = resume_at_ms,
+            "Rate limit reached; waiting for next window"
+        );
+    }
+
+    rate_limiter.acquire().await.ok();
+    let _ = update_sync_status(redis, sync_id, SyncStatus::Running).await;
+
+    // ── 第一次嘗試：單次請求完整範圍 ─────────────────────────────────────────
+    let from_str = gap.from_date.to_string();
+    let to_str = gap.to_date.to_string();
+
+    let candles = match fetch_range(
+        http_client,
+        &gap_info.symbol,
+        gap_info.interval,
+        &from_str,
+        &to_str,
+        &api_token,
+    )
+    .await
+    {
+        Ok(c) => {
+            rate_limiter.mark_request_used().await;
+            info!(
+                sync_id  = %sync_id,
+                symbol   = %gap_info.symbol,
+                interval = %gap_info.interval.as_str(),
+                from     = %from_str,
+                to       = %to_str,
+                count    = c.len(),
+                "Single-request fetch complete"
+            );
+            c
+        }
+        Err(e) => {
+            error!(
+                error    = %e,
+                sync_id  = %sync_id,
+                symbol   = %gap_info.symbol,
+                interval = %gap_info.interval.as_str(),
+                from     = %from_str,
+                to       = %to_str,
+                "Single-request fetch failed"
+            );
+            sync_log_update_counts(db_pool, sync_id, 0, 0, 1)
+                .await
+                .unwrap_or_else(|e| warn!(error = %e, "sync_log update failed"));
+            return Ok((0, 0, 1));
+        }
+    };
+
+    // ── 截斷偵測：若回傳筆數達閾值，改用分批補抓 ─────────────────────────────
+    //
+    // FinMind 免費版單次回傳上限約 5000 筆。
+    // 5年日K ≈ 1250 筆，正常不會觸發；
+    // 分鐘K或超長範圍才需要 fallback。
+    if candles.len() >= FINMIND_ROW_LIMIT {
+        warn!(
+            sync_id  = %sync_id,
+            symbol   = %gap_info.symbol,
+            interval = %gap_info.interval.as_str(),
+            count    = candles.len(),
+            threshold = FINMIND_ROW_LIMIT,
+            "Response may be truncated, falling back to monthly batches"
+        );
+        return fetch_and_insert_gap_batched(
+            db_pool,
+            http_client,
+            rate_limiter,
+            buffer,
+            redis,
+            sync_id,
+            gap_info,
+            gap,
+            &api_token,
+        )
+        .await;
+    }
+
+    // ── 正常路徑：寫入 buffer ─────────────────────────────────────────────────
+    for candle in candles {
+        buffer
+            .push(candle, &writer, &mut invalidator)
+            .await
+            .map_err(|e| {
+                error!(error = %e, sync_id = %sync_id, "Failed to push candle to buffer");
+                e
+            })?;
+    }
+
+    let flush_started = Instant::now();
+    buffer.flush(&writer, &mut invalidator).await?;
+    let flush_elapsed_ms = flush_started.elapsed().as_millis() as u64;
+
+    let actual_inserted = buffer.total_inserted() - initial_inserted;
+    let actual_skipped = buffer.total_skipped() - initial_skipped;
+
+    if actual_inserted > 0 || actual_skipped > 0 {
+        sync_log_update_counts(db_pool, sync_id, actual_inserted, actual_skipped, 0)
+            .await
+            .unwrap_or_else(|e| warn!(error = %e, "sync_log update failed"));
+    }
+
+    info!(
+        sync_id      = %sync_id,
+        symbol       = %gap_info.symbol,
+        interval     = %gap_info.interval.as_str(),
+        from_date    = %gap.from_date,
+        to_date      = %gap.to_date,
+        inserted     = actual_inserted,
+        skipped      = actual_skipped,
+        flush_ms     = flush_elapsed_ms,
+        elapsed_ms   = gap_started.elapsed().as_millis() as u64,
+        "Gap fetch complete (single-request)"
+    );
+
+    Ok((actual_inserted, actual_skipped, 0))
+}
+
+// ── fallback：分批補抓（截斷時才走這條路）────────────────────────────────────
+
+async fn fetch_and_insert_gap_batched(
+    db_pool: &PgPool,
+    http_client: &Client,
+    rate_limiter: &Arc<FinMindRateLimiter>,
+    buffer: &mut BulkInsertBuffer,
+    redis: &mut MultiplexedConnection,
+    sync_id: &str,
+    gap_info: &GapInfo,
+    gap: &DateRange,
+    api_token: &str,
+) -> Result<(i32, i32, i32), BridgeError> {
+    let gap_started = Instant::now();
     let writer = PostgresDbWriter::new(db_pool.clone());
     let mut invalidator = RedisInvalidator::new(redis.clone());
+
+    let initial_inserted = buffer.total_inserted();
+    let initial_skipped = buffer.total_skipped();
+
+    let batches = gap.clone().into_monthly_batches();
+    let total_batches = batches.len();
+    let mut total_failed = 0i32;
+
+    info!(
+        sync_id   = %sync_id,
+        symbol    = %gap_info.symbol,
+        interval  = %gap_info.interval.as_str(),
+        from_date = %gap.from_date,
+        to_date   = %gap.to_date,
+        batches   = total_batches,
+        "Starting gap fetch (batched fallback)"
+    );
 
     for (i, batch) in batches.iter().enumerate() {
         let batch_started = Instant::now();
@@ -380,15 +557,14 @@ pub async fn fetch_and_insert_gap(
         if let Some(resume_at_ms) = rate_limiter.predicted_resume_at_ms().await {
             let _ = update_sync_status(redis, sync_id, SyncStatus::RateLimitWaiting).await;
             info!(
-                sync_id = %sync_id,
-                symbol = %gap_info.symbol,
+                sync_id      = %sync_id,
+                symbol       = %gap_info.symbol,
                 resume_at_ms = resume_at_ms,
                 "Rate limit reached; waiting for next window"
             );
         }
 
         rate_limiter.acquire().await.ok();
-
         let _ = update_sync_status(redis, sync_id, SyncStatus::Running).await;
 
         let from_str = batch.from_date.to_string();
@@ -400,7 +576,7 @@ pub async fn fetch_and_insert_gap(
             gap_info.interval,
             &from_str,
             &to_str,
-            &api_token,
+            api_token,
         )
         .await
         {
@@ -413,25 +589,20 @@ pub async fn fetch_and_insert_gap(
                         .push(candle, &writer, &mut invalidator)
                         .await
                         .map_err(|e| {
-                            error!(
-                                error = %e,
-                                sync_id = %sync_id,
-                                "Failed to push candle to buffer"
-                            );
+                            error!(error = %e, sync_id = %sync_id, "Failed to push candle to buffer");
                             e
                         })?;
                 }
 
                 info!(
-                    sync_id  = %sync_id,
-                    symbol   = %gap_info.symbol,
-                    batch    = format!("{}/{}", i + 1, total_batches),
-                    fetched  = fetched,
+                    sync_id    = %sync_id,
+                    symbol     = %gap_info.symbol,
+                    batch      = format!("{}/{}", i + 1, total_batches),
+                    fetched    = fetched,
                     elapsed_ms = batch_started.elapsed().as_millis() as u64,
                     "Batch fetched and pushed to buffer"
                 );
             }
-
             Err(e) => {
                 error!(
                     error    = %e,
@@ -443,7 +614,6 @@ pub async fn fetch_and_insert_gap(
                     "Batch fetch failed"
                 );
                 total_failed += 1;
-
                 sync_log_update_counts(db_pool, sync_id, 0, 0, 1)
                     .await
                     .unwrap_or_else(|e| warn!(error = %e, "sync_log update failed"));
@@ -465,20 +635,18 @@ pub async fn fetch_and_insert_gap(
     }
 
     info!(
-        sync_id = %sync_id,
-        symbol = %gap_info.symbol,
-        interval = %gap_info.interval.as_str(),
-        from_date = %gap.from_date,
-        to_date = %gap.to_date,
-        batches = total_batches,
-        inserted = actual_inserted,
-        skipped = actual_skipped,
+        sync_id        = %sync_id,
+        symbol         = %gap_info.symbol,
+        interval       = %gap_info.interval.as_str(),
+        from_date      = %gap.from_date,
+        to_date        = %gap.to_date,
+        batches        = total_batches,
+        inserted       = actual_inserted,
+        skipped        = actual_skipped,
         failed_batches = total_failed,
-        flush_ms = flush_elapsed_ms,
-        total_elapsed_ms = gap_started.elapsed().as_millis() as u64,
-        db_pool_size = db_pool.size(),
-        db_pool_idle = db_pool.num_idle(),
-        "Gap execution diagnostics"
+        flush_ms       = flush_elapsed_ms,
+        elapsed_ms     = gap_started.elapsed().as_millis() as u64,
+        "Gap fetch complete (batched fallback)"
     );
 
     Ok((actual_inserted, actual_skipped, total_failed))
