@@ -127,6 +127,7 @@ export function useTriggerSync() {
 
 export function useCancelSync() {
   const setActiveSyncId = useAppStore((s) => s.setActiveSyncId)
+  const queryClient = useQueryClient()
 
   return useMutation<void, Error, { syncId: string }>({
     mutationFn: async ({ syncId }) => {
@@ -136,6 +137,9 @@ export function useCancelSync() {
     },
     onSuccess: () => {
       setActiveSyncId(null)
+      // 清除所有同步狀態相關 cache，包含 DailySchedulePanel 的
+      queryClient.removeQueries({ queryKey: ['sync-status'] })
+      queryClient.removeQueries({ queryKey: ['sync-status-schedule-panel'] })
     },
   })
 }

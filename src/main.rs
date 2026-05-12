@@ -17,6 +17,7 @@ use crate::data::{
 use crate::services::scheduler::run_daily_scheduler;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tokio_util::sync::CancellationToken;
 
 use tracing_subscriber::{
     fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
@@ -87,8 +88,11 @@ async fn main() -> anyhow::Result<()> {
         bulk_insert_buffer: bulk_insert_buffer.clone(),
     });
 
-    // 啟動每日排程背景 task
-    tokio::spawn(run_daily_scheduler(app_state.clone()));
+    // 建立取消 token
+    let cancel_token = CancellationToken::new();
+
+    // 啟動每日排程背景 task 並傳入 token
+    tokio::spawn(run_daily_scheduler(app_state.clone(), cancel_token.clone()));
 
     // 組裝 Router
     let rate_limiter_state = new_rate_limiter_state();
@@ -101,11 +105,12 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(addr = %bind_addr, "Server listening");
 
     // Graceful Shutdown 信號
-    let shutdown_signal = async {
+    let shutdown_signal = async move {
         tokio::signal::ctrl_c()
             .await
             .expect("Failed to listen for shutdown signal");
         tracing::info!("Shutdown signal received, starting graceful shutdown");
+        cancel_token.cancel();
     };
 
     // 啟動 Axum server，掛載 graceful shutdown

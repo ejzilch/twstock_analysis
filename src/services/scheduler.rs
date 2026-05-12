@@ -7,13 +7,14 @@ use crate::services::admin_sync::{StartSyncRequest, SyncService};
 use chrono::{Local, Months};
 use std::{sync::Arc, time};
 use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 const KEY_ENABLED: &str = "daily_sync_enabled";
 const KEY_TIME: &str = "daily_sync_time";
 const KEY_LAST_RUN_DATE: &str = "daily_sync_last_run_date";
 
-pub async fn run_daily_scheduler(state: Arc<AppState>) {
+pub async fn run_daily_scheduler(state: Arc<AppState>, cancel: CancellationToken) {
     loop {
         let now = Local::now();
         let today = now.format(FINMIND_DATE_FORMAT).to_string();
@@ -55,7 +56,14 @@ pub async fn run_daily_scheduler(state: Arc<AppState>) {
                 Ok(s) => s,
                 Err(e) => {
                     warn!(error = %e, "Daily scheduler failed to refresh symbols; skipping this run");
-                    sleep(time::Duration::from_secs(30)).await;
+                    let should_stop = tokio::select! {
+                        _ = tokio::time::sleep(time::Duration::from_secs(30)) => false,
+                        _ = cancel.cancelled() => true,
+                    };
+                    if should_stop {
+                        tracing::info!("Daily scheduler stopped (error recovery)");
+                        return;
+                    }
                     continue;
                 }
             };
@@ -64,7 +72,14 @@ pub async fn run_daily_scheduler(state: Arc<AppState>) {
                 Ok(s) => s,
                 Err(e) => {
                     warn!(error = %e, "Failed to fetch active symbols; skipping this run");
-                    sleep(time::Duration::from_secs(30)).await;
+                    let should_stop = tokio::select! {
+                        _ = tokio::time::sleep(time::Duration::from_secs(30)) => false,
+                        _ = cancel.cancelled() => true,
+                    };
+                    if should_stop {
+                        tracing::info!("Daily scheduler stopped (error recovery)");
+                        return;
+                    }
                     continue;
                 }
             };
@@ -105,6 +120,12 @@ pub async fn run_daily_scheduler(state: Arc<AppState>) {
                 .await;
         }
 
-        sleep(time::Duration::from_secs(30)).await;
+        tokio::select! {
+            _ = tokio::time::sleep(time::Duration::from_secs(30)) => {}
+            _ = cancel.cancelled() => {
+                tracing::info!("Daily scheduler stopped");
+                return;
+            }
+        }
     }
 }

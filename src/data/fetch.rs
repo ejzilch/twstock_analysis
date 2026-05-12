@@ -278,6 +278,27 @@ pub async fn fetch_range(
                 return None;
             }
 
+            // 現有的 finite 檢查之後，再加：
+            if open <= 0.0 || close <= 0.0 || high <= 0.0 || low <= 0.0 {
+                warn!(
+                    symbol = %symbol,
+                    date   = %date,
+                    open, high, low, close,
+                    "Skipping candle with zero/negative price"
+                );
+                return None;
+            }
+
+            // 基本 OHLC 合理性
+            if high < low || high < open || high < close || low > open || low > close {
+                warn!(
+                    symbol = %symbol,
+                    date   = %date,
+                    "Skipping candle with invalid OHLC relationship"
+                );
+                return None;
+            }
+
             let timestamp_ms = date_str_to_ms(&date)?;
 
             Some(RawCandle::new(

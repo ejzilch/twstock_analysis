@@ -1,13 +1,10 @@
 'use client'
 /**
- * src/components/settings/ManualSyncPanel.tsx（修正版）
+ * src/components/settings/ManualSyncPanel.tsx（更新版）
  *
- * 修正清單：
- *   1. useSymbols() 只在此處呼叫一次，allSymbols 往下傳給 SymbolSearchInput
- *   2. 前 10 大市值按鈕：symbols 尚未載入時顯示 loading，載入後正常運作
- *   3. isIdle 判斷加入 symbols loading 狀態，避免空白期誤判
- *   4. 加入 symbols 載入失敗的 error 提示
- *   5. handleReset 改用 hook 而非直接呼叫 getState()
+ * 新增：
+ *   - handleRetryFailed：接收失敗股票代號，自動選取並回到 idle 狀態重新同步
+ *   - 將 onRetryFailed 傳入 SyncResult
  */
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -36,22 +33,16 @@ export function ManualSyncPanel() {
   const setActiveSyncId = useAppStore((s) => s.setActiveSyncId)
 
   const [selected, setSelected] = useState<SymbolItem[]>([])
-  // 預設不全量回補
   const [fullSync, setFullSync] = useState(false)
-  // 取得當前的時間與年份
-  const today = new Date();
-  const currentYear = today.getFullYear();
-  // 直接組出兩年前的 1 月 1 日 (例如今年 2026，這裡會組出 "2020-01-01")
-  const defaultFromStr = `${currentYear - 5}-01-01`;
-  // 處理 toDate，這裡建議也改用字串組合，避免 toISOString() 的時區問題
-  // (toISOString() 會轉成 UTC 時間，在台灣時間早上 8 點前執行，日期會跑到前一天)
-  const defaultToStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const [fromDate, setFromDate] = useState(defaultFromStr);  // e.g. "2021-01-01"
-  const [toDate, setToDate] = useState(defaultToStr);        // e.g. "2026-04-23"
+  const today = new Date()
+  const currentYear = today.getFullYear()
+  const defaultFromStr = `${currentYear - 5}-01-01`
+  const defaultToStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+  const [fromDate, setFromDate] = useState(defaultFromStr)
+  const [toDate, setToDate] = useState(defaultToStr)
   const [interval, setInterval] = useState<'1m' | '5m' | '15m' | '1h' | '4h' | '1d'>('1d')
   const [allSymbolsMode, setAllSymbolsMode] = useState(false)
 
-  // ── 單一 useSymbols 呼叫，allSymbols 往下傳 ────────────────────────────────
   const {
     data: symbolsData,
     isLoading: symbolsLoading,
@@ -95,17 +86,14 @@ export function ManualSyncPanel() {
 
   function handleSelect(symbol: SymbolItem) {
     setAllSymbolsMode(false)
-
     if (selected.some((s) => s.symbol === symbol.symbol)) return
     setSelected((prev) => [...prev, symbol])
   }
 
   function handleSelectManualSymbol(symbolCode: string) {
     setAllSymbolsMode(false)
-
     const symbol = symbolCode.trim()
     if (!symbol || selected.some((s) => s.symbol === symbol)) return
-
     const fromList = allSymbols.find((s) => s.symbol === symbol)
     setSelected((prev) => [...prev, fromList ?? makeFallbackSymbol(symbol)])
   }
@@ -116,15 +104,10 @@ export function ManualSyncPanel() {
 
   function handleSelectTop10() {
     setAllSymbolsMode(false)
-
     const top10 = TOP_10_SYMBOLS
       .map((code) => allSymbols.find((s) => s.symbol === code) ?? makeFallbackSymbol(code))
-    const toAdd = top10.filter(
-      (s) => !selected.some((sel) => sel.symbol === s.symbol)
-    )
-
-    if (toAdd.length === 0) return  // 全部已選，不需再加
-
+    const toAdd = top10.filter((s) => !selected.some((sel) => sel.symbol === s.symbol))
+    if (toAdd.length === 0) return
     setSelected((prev) => [...prev, ...toAdd])
   }
 
@@ -141,7 +124,6 @@ export function ManualSyncPanel() {
 
     triggerSync.mutate({
       mode: allSymbolsMode ? 'all' : 'partial',
-      // 讓後端判斷 undefined 為「全部」
       symbols: allSymbolsMode ? undefined : selected.map((s) => s.symbol),
       fullSync,
       fromDate,
@@ -155,10 +137,35 @@ export function ManualSyncPanel() {
   function handleReset() {
     setActiveSyncId(null)
     setSelected([])
-    // 清除同步狀態 cache，避免舊狀態殘留
     queryClient.removeQueries({ queryKey: ['sync-status'] })
-    // 同步完成後刷新 symbols，讓新增股票可立即被搜尋
     queryClient.invalidateQueries({ queryKey: ['symbols'] })
+  }
+
+  // ── 失敗重試：選取失敗股票並觸發同步 ─────────────────────────────────────────
+
+  function handleRetryFailed(failedSymbols: string[]) {
+    // 先重置狀態
+    setActiveSyncId(null)
+    queryClient.removeQueries({ queryKey: ['sync-status'] })
+
+    // 將失敗股票填入 selected
+    const items = failedSymbols.map(
+      (code) => allSymbols.find((s) => s.symbol === code) ?? makeFallbackSymbol(code)
+    )
+    setSelected(items)
+    setAllSymbolsMode(false)
+
+    // 稍微延遲觸發，確保 state 已清除（避免 409）
+    setTimeout(() => {
+      triggerSync.mutate({
+        mode: 'partial',
+        symbols: failedSymbols,
+        fullSync,
+        fromDate,
+        toDate: fullSync ? undefined : toDate,
+        intervals: fullSync ? undefined : [interval],
+      })
+    }, 300)
   }
 
   // ── 渲染 ─────────────────────────────────────────────────────────────────────
@@ -196,12 +203,13 @@ export function ManualSyncPanel() {
         </div>
       )}
 
-      {/* 完成：結果顯示 */}
+      {/* 完成：結果顯示（含失敗重試） */}
       {isCompleted && syncStatus.data && (
         <SyncResult
           progress={syncStatus.data.progress}
           summary={syncStatus.data.summary}
           onReset={handleReset}
+          onRetryFailed={handleRetryFailed}
         />
       )}
 
@@ -245,7 +253,6 @@ export function ManualSyncPanel() {
               </button>
             )}
 
-            {/* 股票清單載入失敗提示 */}
             {symbolsError && (
               <span className="text-xs text-red-400">
                 ⚠ 股票清單載入失敗，請重新整理頁面
@@ -253,7 +260,7 @@ export function ManualSyncPanel() {
             )}
           </div>
 
-          {/* 搜尋框（allSymbols 由此層傳入，不重複 fetch）*/}
+          {/* 搜尋框 */}
           <SymbolSearchInput
             allSymbols={allSymbols}
             selectedSymbols={selected.map((s) => s.symbol)}
@@ -282,7 +289,7 @@ export function ManualSyncPanel() {
             )}
           </div>
 
-          {/* 開始同步按鈕 */}
+          {/* 同步範圍設定 */}
           <div className="border border-surface-border rounded-lg p-3 bg-surface-card/40 space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs text-slate-400">同步範圍</span>
@@ -342,7 +349,6 @@ export function ManualSyncPanel() {
                   : `開始同步（${selected.length} 檔）`}
           </Button>
 
-          {/* 預估提示：只在有選擇且 API 有資料時顯示 */}
           {selected.length > 0 && !symbolsLoading && (
             <p className="text-xs text-slate-600 text-center">
               預估約 {Math.ceil(selected.length * 6 * 156 / 590)} 小時完成
@@ -350,19 +356,16 @@ export function ManualSyncPanel() {
             </p>
           )}
         </div>
-      )
-      }
+      )}
 
       {/* trigger sync 錯誤提示 */}
-      {
-        triggerSync.isError && !isSyncConflictError && (
-          <ErrorToast
-            error={triggerSync.error}
-            onRetry={handleStartSync}
-            onRedirect={router.push}
-          />
-        )
-      }
-    </Card >
+      {triggerSync.isError && !isSyncConflictError && (
+        <ErrorToast
+          error={triggerSync.error}
+          onRetry={handleStartSync}
+          onRedirect={router.push}
+        />
+      )}
+    </Card>
   )
 }
