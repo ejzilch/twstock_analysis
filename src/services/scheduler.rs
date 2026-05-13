@@ -4,9 +4,8 @@ use crate::data::symbol_sync::{fetch_active_symbols, refresh_symbols_from_finmin
 use crate::models::enums::{SymbolFetchScope, SyncMode};
 use crate::services::admin_sync::{StartSyncRequest, SyncService};
 
-use chrono::{Local, Months};
+use chrono::{Duration, Local, NaiveTime, Timelike};
 use std::{sync::Arc, time};
-use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
@@ -92,11 +91,23 @@ pub async fn run_daily_scheduler(state: Arc<AppState>, cancel: CancellationToken
                     "Daily scheduler refreshed FinMind symbols"
                 );
 
-                let from_date = now
-                    .date_naive()
-                    .checked_sub_months(Months::new(60))
-                    .map(|d| d.format(FINMIND_DATE_FORMAT).to_string());
-                let to_date = Some(now.date_naive().format(FINMIND_DATE_FORMAT).to_string());
+                let schedule_hour = NaiveTime::parse_from_str(&schedule_time, "%H:%M")
+                    .ok()
+                    .map(|time| time.hour())
+                    .unwrap_or(2);
+                let target_date = if schedule_hour < 12 {
+                    now.date_naive().pred_opt().unwrap_or(now.date_naive())
+                } else {
+                    now.date_naive()
+                };
+
+                // 與 fetch_latest 行為一致：回補最近 7 天缺漏資料
+                let from_date = Some(
+                    (target_date - Duration::days(7))
+                        .format(FINMIND_DATE_FORMAT)
+                        .to_string(),
+                );
+                let to_date = Some(target_date.format(FINMIND_DATE_FORMAT).to_string());
 
                 let _ = SyncService::start(
                     &state,

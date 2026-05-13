@@ -8,6 +8,7 @@
  */
 import { useState, useEffect } from 'react'
 import { clsx } from 'clsx'
+import { Pagination } from '@/src/components/ui'
 import type { RateLimitInfo, SymbolProgress, GapProgress, SymbolSyncStatus } from '@/src/types/api.types'
 
 interface SyncProgressProps {
@@ -19,6 +20,8 @@ const DONE_STATUSES: SymbolSyncStatus[] = ['completed', 'failed', 'skipped']
 
 export function SyncProgress({ progress, rateLimit }: SyncProgressProps) {
   const [collapsed, setCollapsed] = useState(false)
+  const [progressPage, setProgressPage] = useState(0)
+  const PROGRESS_PAGE_SIZE = 5
 
   const usedPct = Math.round((rateLimit.used_this_hour / rateLimit.limit_per_hour) * 100)
   const remaining = Math.max(rateLimit.used_this_hour, 0)
@@ -28,6 +31,19 @@ export function SyncProgress({ progress, rateLimit }: SyncProgressProps) {
   const remaining_symbols = progress.filter((p) => !DONE_STATUSES.includes(p.status))
   const doneCount = done.length
   const remainingCount = remaining_symbols.length
+
+  const totalProgressPages = Math.ceil(remaining_symbols.length / PROGRESS_PAGE_SIZE)
+  const pagedSymbols = remaining_symbols.slice(
+    progressPage * PROGRESS_PAGE_SIZE,
+    (progressPage + 1) * PROGRESS_PAGE_SIZE,
+  )
+
+  useEffect(() => {
+    const totalPages = Math.ceil(remainingCount / PROGRESS_PAGE_SIZE)
+    if (progressPage >= totalPages && totalPages > 0) {
+      setProgressPage(totalPages - 1)
+    }
+  }, [remainingCount])
 
   return (
     <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
@@ -82,7 +98,11 @@ export function SyncProgress({ progress, rateLimit }: SyncProgressProps) {
 
           {/* Rate limit waiting banner */}
           {rateLimit.is_waiting && rateLimit.resume_at_ms && (
-            <RateLimitWaitBanner resumeAtMs={rateLimit.resume_at_ms} />
+            <RateLimitWaitBanner
+              resumeAtMs={rateLimit.resume_at_ms}
+              usedThisHour={rateLimit.used_this_hour}
+              limitPerHour={rateLimit.limit_per_hour}
+            />
           )}
 
           {/* 已完成摘要（只顯示計數，不展開明細） */}
@@ -96,9 +116,16 @@ export function SyncProgress({ progress, rateLimit }: SyncProgressProps) {
           {/* 進行中 / 等待中的 symbol 列表 */}
           {remainingCount > 0 ? (
             <div className="flex flex-col gap-3">
-              {remaining_symbols.map((p) => (
+              {pagedSymbols.map((p) => (
                 <SymbolProgressRow key={p.symbol} progress={p} />
               ))}
+              {totalProgressPages > 1 && (
+                <Pagination
+                  page={progressPage}
+                  totalPages={totalProgressPages}
+                  onPageChange={setProgressPage}
+                />
+              )}
             </div>
           ) : (
             <p className="text-xs text-slate-600 text-center py-2">
@@ -121,7 +148,15 @@ export function SyncProgress({ progress, rateLimit }: SyncProgressProps) {
 
 // ── Rate limit 等待倒數 ───────────────────────────────────────────────────────
 
-function RateLimitWaitBanner({ resumeAtMs }: { resumeAtMs: number }) {
+function RateLimitWaitBanner({
+  resumeAtMs,
+  usedThisHour,
+  limitPerHour,
+}: {
+  resumeAtMs: number
+  usedThisHour: number
+  limitPerHour: number
+}) {
   const [remaining, setRemaining] = useState(calcRemaining(resumeAtMs))
 
   useEffect(() => {
@@ -135,7 +170,7 @@ function RateLimitWaitBanner({ resumeAtMs }: { resumeAtMs: number }) {
     <div className="flex items-center gap-2 px-3 py-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-xs text-amber-400">
       <span className="text-base">⏳</span>
       <div>
-        <div className="font-medium">達到 FinMind 每小時上限（598 / 600 次）</div>
+        <div className="font-medium">達到 FinMind 每小時上限（{usedThisHour.toLocaleString()} / {limitPerHour.toLocaleString()} 次）</div>
         <div className="opacity-80 mt-0.5">
           將於 <span className="font-mono font-medium">{remaining}</span> 後自動繼續，無需任何操作
         </div>
