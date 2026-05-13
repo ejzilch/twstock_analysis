@@ -9,6 +9,7 @@
  */
 import { useState } from 'react'
 import { clsx } from 'clsx'
+import { Pagination } from '@/src/components/ui'
 import type { SymbolProgress, SyncSummary } from '@/src/types/api.types'
 
 interface SyncResultProps {
@@ -22,7 +23,9 @@ interface SyncResultProps {
 const PAGE_SIZE = 10
 
 export function SyncResult({ progress, summary, onReset, onRetryFailed }: SyncResultProps) {
-  const [page, setPage] = useState(0)
+  const [completedPage, setCompletedPage] = useState(0)
+  const [failedPage, setFailedPage] = useState(0)
+  const [skippedPage, setSkippedPage] = useState(0)
   const [showSkipped, setShowSkipped] = useState(false)
 
   const failedList = progress.filter((p) => p.status === 'failed')
@@ -34,8 +37,12 @@ export function SyncResult({ progress, summary, onReset, onRetryFailed }: SyncRe
   const noDataSynced = summary.total_inserted === 0 && summary.total_failed === 0 && summary.total_skipped === 0
 
   // ── 分頁邏輯（只對 completedList 分頁）──────────────────────────────────────
-  const totalPages = Math.ceil(completedList.length / PAGE_SIZE)
-  const pagedCompleted = completedList.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const completedTotalPages = Math.ceil(completedList.length / PAGE_SIZE)
+  const pagedCompleted = completedList.slice(completedPage * PAGE_SIZE, (completedPage + 1) * PAGE_SIZE)
+  const failedTotalPages = Math.ceil(failedList.length / PAGE_SIZE)
+  const pagedFailed = failedList.slice(failedPage * PAGE_SIZE, (failedPage + 1) * PAGE_SIZE)
+  const skippedTotalPages = Math.ceil(skippedList.length / PAGE_SIZE)
+  const pagedSkipped = skippedList.slice(skippedPage * PAGE_SIZE, (skippedPage + 1) * PAGE_SIZE)
 
   // ── 失敗重試 ─────────────────────────────────────────────────────────────────
   function handleRetryFailed() {
@@ -97,7 +104,7 @@ export function SyncResult({ progress, summary, onReset, onRetryFailed }: SyncRe
 
           {/* 失敗股票標籤群 */}
           <div className="flex flex-wrap gap-1.5 mt-2">
-            {failedList.map((p) => (
+            {pagedFailed.map((p) => (
               <div
                 key={p.symbol}
                 className="flex items-center gap-1 px-2 py-0.5 rounded-md
@@ -111,10 +118,17 @@ export function SyncResult({ progress, summary, onReset, onRetryFailed }: SyncRe
 
           {/* 失敗明細（每個 symbol 各自的缺口狀態）*/}
           <div className="mt-3 space-y-1">
-            {failedList.map((p) => (
+            {pagedFailed.map((p) => (
               <SymbolResultRow key={p.symbol} progress={p} compact />
             ))}
           </div>
+          {failedTotalPages > 1 && (
+            <Pagination
+              page={failedPage}
+              totalPages={failedTotalPages}
+              onPageChange={setFailedPage}
+            />
+          )}
         </div>
       )}
 
@@ -125,9 +139,9 @@ export function SyncResult({ progress, summary, onReset, onRetryFailed }: SyncRe
             <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
               <span>✓</span> 完成股票（{completedList.length} 檔）
             </span>
-            {totalPages > 1 && (
+            {completedTotalPages > 1 && (
               <span className="text-xs text-slate-500">
-                第 {page + 1} / {totalPages} 頁
+                第 {completedPage + 1} / {completedTotalPages} 頁
               </span>
             )}
           </div>
@@ -139,60 +153,12 @@ export function SyncResult({ progress, summary, onReset, onRetryFailed }: SyncRe
           </div>
 
           {/* 分頁控制 */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-1 mt-3">
-              <button
-                onClick={() => setPage(0)}
-                disabled={page === 0}
-                className="text-xs px-2 py-1 rounded text-slate-500 hover:text-slate-300
-                           disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                «
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-                disabled={page === 0}
-                className="text-xs px-2 py-1 rounded text-slate-500 hover:text-slate-300
-                           disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                ‹
-              </button>
-
-              {/* 頁碼按鈕（最多顯示 5 個） */}
-              {Array.from({ length: totalPages }, (_, i) => i)
-                .filter((i) => Math.abs(i - page) <= 2)
-                .map((i) => (
-                  <button
-                    key={i}
-                    onClick={() => setPage(i)}
-                    className={clsx(
-                      'text-xs w-6 h-6 rounded transition-all',
-                      i === page
-                        ? 'bg-brand-600 text-white'
-                        : 'text-slate-500 hover:text-slate-300 hover:bg-surface-hover',
-                    )}
-                  >
-                    {i + 1}
-                  </button>
-                ))}
-
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                disabled={page >= totalPages - 1}
-                className="text-xs px-2 py-1 rounded text-slate-500 hover:text-slate-300
-                           disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                ›
-              </button>
-              <button
-                onClick={() => setPage(totalPages - 1)}
-                disabled={page >= totalPages - 1}
-                className="text-xs px-2 py-1 rounded text-slate-500 hover:text-slate-300
-                           disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-              >
-                »
-              </button>
-            </div>
+          {completedTotalPages > 1 && (
+            <Pagination
+              page={completedPage}
+              totalPages={completedTotalPages}
+              onPageChange={setCompletedPage}
+            />
           )}
         </div>
       )}
@@ -209,7 +175,7 @@ export function SyncResult({ progress, summary, onReset, onRetryFailed }: SyncRe
           </button>
           {showSkipped && (
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {skippedList.map((p) => (
+              {pagedSkipped.map((p) => (
                 <span
                   key={p.symbol}
                   className="px-2 py-0.5 rounded-md bg-surface border border-surface-border
@@ -219,6 +185,13 @@ export function SyncResult({ progress, summary, onReset, onRetryFailed }: SyncRe
                 </span>
               ))}
             </div>
+          )}
+          {showSkipped && skippedTotalPages > 1 && (
+            <Pagination
+              page={skippedPage}
+              totalPages={skippedTotalPages}
+              onPageChange={setSkippedPage}
+            />
           )}
         </div>
       )}

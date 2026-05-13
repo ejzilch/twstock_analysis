@@ -141,22 +141,6 @@ pub async fn fetch_trading_dates(
         .collect())
 }
 
-/// 取得指定股票的最新 K 線（排程用）。
-pub async fn fetch_latest(
-    client: &Client,
-    symbol: &str,
-    interval: Interval,
-    api_token: &str,
-) -> Result<Vec<RawCandle>, BridgeError> {
-    // 取最近 7 天資料，排程每日只需補最新一筆
-    let today = chrono::Utc::now().format(FINMIND_DATE_FORMAT).to_string();
-    let week_ago = (chrono::Utc::now() - chrono::Duration::days(7))
-        .format(FINMIND_DATE_FORMAT)
-        .to_string();
-
-    fetch_range(client, symbol, interval, &week_ago, &today, api_token).await
-}
-
 // ── 新增函數：fetch_range ─────────────────────────────────────────────────────
 
 /// 取得指定股票、指定時間範圍的歷史 K 線（手動補資料用）。

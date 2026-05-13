@@ -41,9 +41,9 @@ pub const FINMIND_API_TIMEOUT_SECS: u64 = 30;
 /// FinMind 免費方案每小時請求上限
 pub const FINMIND_RATE_LIMIT_PER_HOUR: u32 = 600;
 
-/// Rate limit 安全緩衝：保留 3 次，避免邊界誤差
-/// 實際觸發等待的閾值為：FINMIND_RATE_LIMIT_PER_HOUR - FINMIND_RATE_LIMIT_BUFFER = 598
-pub const FINMIND_RATE_LIMIT_BUFFER: u32 = 2;
+/// Rate limit 安全緩衝：保留 0 次，避免邊界誤差
+/// 實際觸發等待的閾值為：FINMIND_RATE_LIMIT_PER_HOUR - FINMIND_RATE_LIMIT_BUFFER = 600
+pub const FINMIND_RATE_LIMIT_BUFFER: u32 = 0;
 
 /// 達到每小時上限後，額外延遲秒數（避免供應商用量統計有延遲）
 pub const FINMIND_RATE_LIMIT_RESUME_DELAY_SECS: u64 = 45;
