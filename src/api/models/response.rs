@@ -25,21 +25,6 @@ impl ErrorResponse {
             request_id: None,
         }
     }
-
-    /// 建立有 fallback 的錯誤 response（AI 降級場景）
-    pub fn with_fallback(
-        error_code: impl Into<String>,
-        message: impl Into<String>,
-        request_id: Option<String>,
-    ) -> Self {
-        Self {
-            error_code: error_code.into(),
-            message: message.into(),
-            fallback_available: true,
-            timestamp_ms: chrono::Utc::now().timestamp_millis(),
-            request_id,
-        }
-    }
 }
 
 // ── 健康檢查 Response ─────────────────────────────────────────────────────────
@@ -123,16 +108,5 @@ mod tests {
         let err = ErrorResponse::new("SYMBOL_NOT_FOUND", "Symbol not found");
         assert!(!err.fallback_available);
         assert_eq!(err.error_code, "SYMBOL_NOT_FOUND");
-    }
-
-    #[test]
-    fn test_error_response_with_fallback() {
-        let err = ErrorResponse::with_fallback(
-            "AI_SERVICE_TIMEOUT",
-            "AI timed out",
-            Some("req-001".to_string()),
-        );
-        assert!(err.fallback_available);
-        assert_eq!(err.request_id, Some("req-001".to_string()));
     }
 }

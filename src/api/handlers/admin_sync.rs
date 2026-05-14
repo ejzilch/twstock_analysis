@@ -5,8 +5,7 @@
 use crate::app_state::AppState;
 use crate::constants::{ERROR_SYNC_ALREADY_RUNNING, ERROR_SYNC_NOT_FOUND};
 use crate::data::models::current_timestamp_ms;
-use crate::models::enums::Interval;
-use crate::models::enums::{SyncMode, SyncStatus};
+use crate::models::enums::{DatasetType, SyncMode, SyncStatus};
 use crate::services::admin_sync::{StartSyncRequest, SyncService, SyncServiceError, SyncSummary};
 use crate::services::sync_state::{
     clear_sync_state, find_running_sync, load_sync_state, request_sync_cancel, update_sync_status,
@@ -25,21 +24,18 @@ use tracing::error;
 pub struct AdminSyncRequest {
     /// 冪等性識別碼，由前端產生
     pub request_id: String,
-
     /// 冪等性識別碼，由前端產生
     pub mode: Option<SyncMode>,
-
     /// 要同步的股票代號清單，至少 1 檔
     pub symbols: Option<Vec<String>>,
-
     /// 是否全量回補（true: 忽略 from/to）
     pub full_sync: Option<bool>,
     /// 自訂起始日期（YYYY-MM-DD）
     pub from_date: Option<String>,
     /// 自訂結束日期（YYYY-MM-DD）
     pub to_date: Option<String>,
-    /// 只同步指定 K 線刻度；空值代表全部
-    pub intervals: Option<Vec<Interval>>,
+    /// 只同步選定的 dataset
+    pub datasets: Option<Vec<DatasetType>>,
 }
 
 // ── Response ──────────────────────────────────────────────────────────────────
@@ -78,7 +74,10 @@ pub async fn trigger_manual_sync(
         full_sync: body.full_sync.unwrap_or(true),
         from_date: body.from_date.clone(),
         to_date: body.to_date.clone(),
-        intervals: body.intervals.clone().unwrap_or_default(),
+        datasets: body
+            .datasets
+            .clone()
+            .unwrap_or_else(|| vec![DatasetType::TaiwanStockPrice]),
     };
 
     match SyncService::start(&state, req).await {

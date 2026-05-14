@@ -6,22 +6,20 @@ mod data;
 mod domain;
 mod models;
 mod services;
+use std::sync::Arc;
+use tokio::net::TcpListener;
+use tokio_util::sync::CancellationToken;
+use tracing_subscriber::{
+    fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
+};
+
 use crate::ai_client::AiServiceClient;
 use crate::api::build_router;
 use crate::api::middleware::rate_limit::new_rate_limiter_state;
 use crate::app_state::AppState;
-use crate::data::{
-    db::BulkInsertBuffer,
-    fetch_rate_limiter::{ApiTier, FinMindRateLimiter},
-};
+use crate::data::{db::BulkInsertBuffer, fetch_rate_limiter::FinMindRateLimiter};
 use crate::services::scheduler::run_daily_scheduler;
-use std::sync::Arc;
-use tokio::net::TcpListener;
-use tokio_util::sync::CancellationToken;
 
-use tracing_subscriber::{
-    fmt, prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt, EnvFilter,
-};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 載入 .env 檔案
@@ -51,17 +49,8 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Redis client initialized");
 
-    // 初始化 FinMind Rate Limiter
-    let finmind_tier = match std::env::var("FINMIND_API_TIER")
-        .unwrap_or_else(|_| "free".to_string())
-        .as_str()
-    {
-        "paid" => ApiTier::Paid,
-        _ => ApiTier::Free,
-    };
-
-    let finmind_rate_limiter = FinMindRateLimiter::new(finmind_tier);
-    tracing::info!(tier = ?finmind_tier, "FinMind rate limiter initialized");
+    let finmind_rate_limiter = FinMindRateLimiter::new();
+    tracing::info!("FinMind rate limiter initialized");
 
     // 初始化 BulkInsertBuffer
     let bulk_insert_buffer = Arc::new(tokio::sync::Mutex::new(BulkInsertBuffer::new()));

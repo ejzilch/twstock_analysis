@@ -19,6 +19,7 @@ import { SyncProgress } from './SyncProgress'
 import { SyncResult } from './SyncResult'
 import type { SymbolItem } from '@/src/types/api.types'
 import { useQueryClient } from '@tanstack/react-query'
+import { clsx } from 'clsx'
 
 // 前 10 大市值股票代號
 const TOP_10_SYMBOLS = [
@@ -40,7 +41,18 @@ export function ManualSyncPanel() {
   const defaultToStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
   const [fromDate, setFromDate] = useState(defaultFromStr)
   const [toDate, setToDate] = useState(defaultToStr)
+
+  const DATASET_OPTIONS = [
+    { value: 'taiwan_stock_price', label: 'K線價格', needsInterval: true },
+    { value: 'taiwan_stock_institutional_investors_buy_sell', label: '三大法人買賣', needsInterval: false },
+    { value: 'taiwan_stock_info', label: '股票基本資訊', needsInterval: false },
+    { value: 'taiwan_stock_trading_date', label: '交易日曆', needsInterval: false },
+  ] as const
+
+  type DatasetValue = typeof DATASET_OPTIONS[number]['value']
+
   const [interval, setInterval] = useState<'1m' | '5m' | '15m' | '1h' | '4h' | '1d'>('1d')
+  const [selectedDatasets, setSelectedDatasets] = useState<DatasetValue[]>(['taiwan_stock_price'])
   const [allSymbolsMode, setAllSymbolsMode] = useState(false)
 
   const {
@@ -129,6 +141,7 @@ export function ManualSyncPanel() {
       fromDate,
       toDate: fullSync ? undefined : toDate,
       intervals: fullSync ? undefined : [interval],
+      datasets: selectedDatasets,
     })
   }
 
@@ -137,6 +150,7 @@ export function ManualSyncPanel() {
   function handleReset() {
     setActiveSyncId(null)
     setSelected([])
+    setSelectedDatasets(['taiwan_stock_price'])
     queryClient.removeQueries({ queryKey: ['sync-status'] })
     queryClient.invalidateQueries({ queryKey: ['symbols'] })
   }
@@ -167,6 +181,19 @@ export function ManualSyncPanel() {
       })
     }, 300)
   }
+
+  // ── dataset 切換 ──────────────────────────────────────────────────────────
+  function handleToggleDataset(value: DatasetValue) {
+    setSelectedDatasets((prev) =>
+      prev.includes(value)
+        ? prev.filter((d) => d !== value)
+        : [...prev, value]
+    )
+  }
+
+  const showIntervalSelector = selectedDatasets.some(
+    (d) => DATASET_OPTIONS.find((o) => o.value === d)?.needsInterval
+  )
 
   // ── 渲染 ─────────────────────────────────────────────────────────────────────
 
@@ -289,6 +316,27 @@ export function ManualSyncPanel() {
             )}
           </div>
 
+          {/* Dataset 選擇 */}
+          <div className="border border-surface-border rounded-lg p-3 bg-surface-card/40 space-y-2">
+            <span className="text-xs text-slate-400">同步資料類型</span>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {DATASET_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => handleToggleDataset(opt.value)}
+                  className={clsx(
+                    'text-xs px-2.5 py-1 rounded-lg border transition-all',
+                    selectedDatasets.includes(opt.value)
+                      ? 'bg-brand-600/20 border-brand-500/50 text-brand-300'
+                      : 'bg-surface border-surface-border text-slate-400 hover:text-slate-200 hover:bg-surface-hover'
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* 同步範圍設定 */}
           <div className="border border-surface-border rounded-lg p-3 bg-surface-card/40 space-y-3">
             <div className="flex items-center justify-between">
@@ -317,18 +365,20 @@ export function ManualSyncPanel() {
                   onChange={(e) => setToDate(e.target.value)}
                   className="px-2 py-1.5 rounded bg-surface border border-surface-border text-xs text-slate-200"
                 />
-                <select
-                  value={interval}
-                  onChange={(e) => setInterval(e.target.value as typeof interval)}
-                  className="px-2 py-1.5 rounded bg-surface border border-surface-border text-xs text-slate-200"
-                >
-                  <option value="1m">1m</option>
-                  <option value="5m">5m</option>
-                  <option value="15m">15m</option>
-                  <option value="1h">1h</option>
-                  <option value="4h">4h</option>
-                  <option value="1d">1d</option>
-                </select>
+                {showIntervalSelector && (
+                  <select
+                    value={interval}
+                    onChange={(e) => setInterval(e.target.value as typeof interval)}
+                    className="px-2 py-1.5 rounded bg-surface border border-surface-border text-xs text-slate-200"
+                  >
+                    <option value="1m">1m</option>
+                    <option value="5m">5m</option>
+                    <option value="15m">15m</option>
+                    <option value="1h">1h</option>
+                    <option value="4h">4h</option>
+                    <option value="1d">1d</option>
+                  </select>
+                )}
               </div>
             )}
           </div>
@@ -336,7 +386,12 @@ export function ManualSyncPanel() {
           <Button
             onClick={handleStartSync}
             loading={triggerSync.isPending}
-            disabled={(!allSymbolsMode && selected.length === 0) || symbolsLoading || (!fullSync && (!fromDate || !toDate))}
+            disabled={
+              (!allSymbolsMode && selected.length === 0) ||
+              symbolsLoading ||
+              (!fullSync && (!fromDate || !toDate)) ||
+              selectedDatasets.length === 0
+            }
             size="lg"
             className="w-full"
           >

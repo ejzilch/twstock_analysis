@@ -10,6 +10,8 @@ migrations/
 ├── 002_rollback.sql
 ├── 003_create_sync_log.sql           # 新增 sync_log table
 ├── 003_rollback.sql
+├── 004_create_institutional_investors  # 新增 institutional_investors table
+├── 004_rollback.sql
 └── run_migrations.sh                 # 執行腳本
 ```
 
@@ -18,7 +20,7 @@ migrations/
 **必須依序執行，不可跳過：**
 
 ```
-001 → 002 → 003
+001 → 002 → 003 → 004
 ```
 
 ## 使用方式
@@ -34,6 +36,7 @@ export DATABASE_URL=postgres://user:pass@localhost:5432/ai_bridge
 ./run_migrations.sh 002
 
 # 回滾指定編號（從最新往舊回滾）
+./run_migrations.sh rollback 004
 ./run_migrations.sh rollback 003
 ./run_migrations.sh rollback 002
 ./run_migrations.sh rollback 001
@@ -74,6 +77,26 @@ export DATABASE_URL=postgres://user:pass@localhost:5432/ai_bridge
 | `started_at_ms` | BIGINT | 開始時間 |
 | `completed_at_ms` | BIGINT NULL | 完成時間，NULL 表示未完成 |
 | `status` | TEXT | `running` / `rate_limit_waiting` / `completed` / `failed` |
+
+### 004 — institutional_investors table（新建）
+
+記錄三大法人每日買賣超資料（寬表）。
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `symbol` | VARCHAR(20) PK | 股票代號 |
+| `date` | DATE PK | 交易日期 |
+| `foreign_investor_buy` | BIGINT | 外資買進股數 |
+| `foreign_investor_sell` | BIGINT | 外資賣出股數 |
+| `investment_trust_buy` | BIGINT | 投信買進股數 |
+| `investment_trust_sell` | BIGINT | 投信賣出股數 |
+| `dealer_self_buy` | BIGINT | 自營商買進股數 |
+| `dealer_self_sell` | BIGINT | 自營商賣出股數 |
+| `dealer_hedging_buy` | BIGINT | 自營商避險買進股數 |
+| `dealer_hedging_sell` | BIGINT | 自營商避險賣出股數 |
+| `foreign_dealer_self_buy` | BIGINT | 外資自營商買進股數 |
+| `foreign_dealer_self_sell` | BIGINT | 外資自營商賣出股數 |
+| `created_at_ms` | BIGINT | 第一次寫入時間戳（毫秒） |
 
 ## 注意事項
 
