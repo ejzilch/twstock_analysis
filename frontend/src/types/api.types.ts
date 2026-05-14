@@ -114,6 +114,7 @@ export interface ManualSyncRequest {
     from_date: string | undefined
     to_date: string | undefined
     intervals: string[] | undefined
+    datasets: string[] | undefined
 }
 
 /** POST /api/v1/admin/sync Response 202 */

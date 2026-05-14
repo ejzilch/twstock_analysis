@@ -1,19 +1,6 @@
 use crate::models::{DataSource, Interval};
 use serde::{Deserialize, Serialize};
 
-/// 封裝向外部 API 抓取資料所需的參數
-///
-/// 由 fetch.rs 建立後傳入對應的資料來源 fetcher。
-/// interval 合法值: "1m" / "5m" / "15m" / "1h" / "4h" / "1d"
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FetchParams {
-    pub symbol: String,
-    pub from_ms: i64,
-    pub to_ms: i64,
-    pub interval: Interval, // "1m" / "5m" / "15m" / "1h" / "4h" / "1d"
-    pub source: DataSource,
-}
-
 /// 從外部 API 取得的原始 K 線資料。
 ///
 /// 寫入 DB 時使用 `INSERT ... ON CONFLICT DO NOTHING` 確保冪等性。
@@ -79,25 +66,6 @@ impl RawCandle {
             created_at_ms: current_timestamp_ms(),
         }
     }
-
-    /// 驗證所有浮點數值皆為有限值（非 NaN / Inf）。
-    pub fn validate_finite(&self) -> Result<(), String> {
-        let fields = [
-            ("open", self.open),
-            ("high", self.high),
-            ("low", self.low),
-            ("close", self.close),
-        ];
-        for (name, value) in fields {
-            if !value.is_finite() {
-                return Err(format!(
-                    "RawCandle field '{}' is not finite: {} (symbol={}, timestamp_ms={})",
-                    name, value, self.symbol, self.timestamp_ms
-                ));
-            }
-        }
-        Ok(())
-    }
 }
 
 /// 傳回目前時間的毫秒級 UTC timestamp。
@@ -126,25 +94,6 @@ mod tests {
             1_000_000,
             DataSource::FinMind,
         )
-    }
-
-    #[test]
-    fn test_validate_finite_passes_for_valid_candle() {
-        assert!(sample_candle().validate_finite().is_ok());
-    }
-
-    #[test]
-    fn test_validate_finite_fails_for_nan() {
-        let mut candle = sample_candle();
-        candle.open = f64::NAN;
-        assert!(candle.validate_finite().is_err());
-    }
-
-    #[test]
-    fn test_validate_finite_fails_for_inf() {
-        let mut candle = sample_candle();
-        candle.high = f64::INFINITY;
-        assert!(candle.validate_finite().is_err());
     }
 
     #[test]

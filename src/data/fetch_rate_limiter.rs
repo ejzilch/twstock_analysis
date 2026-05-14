@@ -9,63 +9,11 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-
 use tokio::sync::Mutex;
-use tracing::info;
 
 use crate::constants::{
     FINMIND_RATE_LIMIT_BUFFER, FINMIND_RATE_LIMIT_PER_HOUR, FINMIND_RATE_LIMIT_RESUME_DELAY_SECS,
 };
-
-// ── ApiTier（Gemini 原始設計，維持不動）──────────────────────────────────────
-
-/// FinMind API 付費等級，預留付費升級切換點。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApiTier {
-    Free,
-    Paid,
-}
-
-/// Rate limit 設定，依 ApiTier 不同而異。
-#[derive(Debug, Clone)]
-pub struct RateLimitConfig {
-    /// 每分鐘最大請求數
-    pub max_requests_per_minute: u32,
-    /// 每日最大請求數
-    pub max_requests_per_hour: u32,
-    /// 目前使用的付費等級
-    pub upgrade_tier: ApiTier,
-}
-
-impl RateLimitConfig {
-    pub fn for_tier(tier: ApiTier) -> Self {
-        match tier {
-            ApiTier::Free => Self {
-                max_requests_per_minute: 10,
-                max_requests_per_hour: 600,
-                upgrade_tier: ApiTier::Free,
-            },
-            ApiTier::Paid => Self {
-                max_requests_per_minute: 60,
-                max_requests_per_hour: 1_500,
-                upgrade_tier: ApiTier::Paid,
-            },
-        }
-    }
-}
-
-// ── 進度記錄（手動同步用）────────────────────────────────────────────────────
-
-/// 目前處理的進度點，rate limit 等待後從此繼續。
-#[derive(Debug, Clone, Default)]
-pub struct SyncProgress {
-    /// 目前處理的股票代號
-    pub current_symbol: String,
-    /// 目前處理的 K 線粒度
-    pub current_interval: String,
-    /// 目前補到哪一天（格式 "YYYY-MM-DD"）
-    pub current_date: String,
-}
 
 // ── FinMindRateLimiter ────────────────────────────────────────────────────────
 
@@ -75,29 +23,17 @@ pub struct SyncProgress {
 /// 使用 Arc<Mutex<>> 確保多個 tokio task 安全共用。
 #[derive(Debug)]
 pub struct FinMindRateLimiter {
-    config: RateLimitConfig,
     usage_timestamps: Mutex<VecDeque<Instant>>,
     /// 達到 rate limit 時的等待結束時間（None 表示目前不在等待）
     resume_at: Mutex<Option<Instant>>,
-    /// 最後記錄的進度（供等待後繼續使用）
-    last_progress: Mutex<SyncProgress>,
 }
 
 impl FinMindRateLimiter {
-    pub fn new(tier: ApiTier) -> Arc<Self> {
+    pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            config: RateLimitConfig::for_tier(tier),
             usage_timestamps: Mutex::new(VecDeque::new()),
             resume_at: Mutex::new(None),
-            last_progress: Mutex::new(SyncProgress::default()),
         })
-    }
-
-    /// 升級 ApiTier（付費後呼叫）。
-    /// 預留介面，實際切換邏輯待定
-    pub fn upgrade_tier(&mut self, new_tier: ApiTier) {
-        self.config = RateLimitConfig::for_tier(new_tier);
-        info!(tier = ?new_tier, "FinMind ApiTier upgraded");
     }
 
     /// 取得目前每小時已使用的請求次數（清理過期紀錄後）。
@@ -141,17 +77,6 @@ impl FinMindRateLimiter {
         })
     }
 
-    /// 記錄目前的同步進度（rate limit 等待後從此繼續）。
-    pub async fn record_progress(&self, progress: SyncProgress) {
-        let mut last = self.last_progress.lock().await;
-        *last = progress;
-    }
-
-    /// 取得最後記錄的進度。
-    pub async fn last_progress(&self) -> SyncProgress {
-        self.last_progress.lock().await.clone()
-    }
-
     /// 若目前呼叫 acquire() 會進入等待，回傳預估 resume_at_ms。
     pub async fn predicted_resume_at_ms(&self) -> Option<i64> {
         let safe_limit = FINMIND_RATE_LIMIT_PER_HOUR - FINMIND_RATE_LIMIT_BUFFER;
@@ -188,8 +113,7 @@ impl FinMindRateLimiter {
     ///   1. 清理 1 小時前的使用紀錄（滑動視窗）
     ///   2. 若當前 1 小時內使用量達到安全上限（上限 - BUFFER），等待到最早那筆滿 1 小時
     ///   3. 等待結束後重試，直到可用
-    ///   4. 回傳 Ok（實際計數由 mark_request_used() 在成功請求後累加）
-    pub async fn acquire(&self) -> Result<(), RateLimitWaiting> {
+    pub async fn acquire(&self) {
         let safe_limit = FINMIND_RATE_LIMIT_PER_HOUR - FINMIND_RATE_LIMIT_BUFFER;
         loop {
             let maybe_wait_duration = {
@@ -234,8 +158,6 @@ impl FinMindRateLimiter {
 
             break;
         }
-
-        Ok(())
     }
 
     /// 在確認請求有效送出後呼叫，累加本地使用量統計。
@@ -245,39 +167,13 @@ impl FinMindRateLimiter {
     }
 }
 
-/// acquire() 回傳的等待狀態（目前設計為直接 async 等待，此型別保留供未來擴充）。
-#[derive(Debug)]
-pub struct RateLimitWaiting {
-    pub resume_at_ms: i64,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_acquire_increments_counter() {
-        let limiter = FinMindRateLimiter::new(ApiTier::Free);
-        assert_eq!(limiter.used_this_hour().await, 0);
-        limiter.acquire().await.unwrap();
-        assert_eq!(limiter.used_this_hour().await, 0);
-    }
-
-    #[tokio::test]
     async fn test_is_not_waiting_initially() {
-        let limiter = FinMindRateLimiter::new(ApiTier::Free);
+        let limiter = FinMindRateLimiter::new();
         assert!(!limiter.is_waiting().await);
-    }
-
-    #[test]
-    fn test_rate_limit_config_free_tier() {
-        let config = RateLimitConfig::for_tier(ApiTier::Free);
-        assert_eq!(config.max_requests_per_hour, 600);
-    }
-
-    #[test]
-    fn test_rate_limit_config_paid_tier() {
-        let config = RateLimitConfig::for_tier(ApiTier::Paid);
-        assert_eq!(config.max_requests_per_hour, 1_500);
     }
 }

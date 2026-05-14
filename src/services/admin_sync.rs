@@ -17,7 +17,7 @@ use crate::data::fetch_rate_limiter::FinMindRateLimiter;
 use crate::data::manual_sync::{run_manual_sync, SyncScope};
 use crate::data::{db::fetch_final_sync_state_from_db, models::current_timestamp_ms};
 use crate::domain::BridgeError;
-use crate::models::enums::{SyncMode, SyncStatus};
+use crate::models::enums::{DatasetType, SyncMode, SyncStatus};
 use crate::BulkInsertBuffer;
 
 use super::sync_state::{find_running_sync, save_sync_state, SyncState};
@@ -40,7 +40,7 @@ pub struct StartSyncRequest {
     pub full_sync: bool,
     pub from_date: Option<String>,
     pub to_date: Option<String>,
-    pub intervals: Vec<crate::models::enums::Interval>,
+    pub datasets: Vec<DatasetType>,
 }
 
 #[derive(serde::Serialize)]
@@ -92,7 +92,6 @@ impl SyncService {
             full_sync: req.full_sync,
             from_date,
             to_date,
-            intervals: req.intervals.clone(),
         };
 
         // ── Step 3: 確認無其他同步進行中 ──────────────────────────────────────
@@ -159,6 +158,7 @@ impl SyncService {
             symbols.clone(),
             scope,
             state.bulk_insert_buffer.clone(),
+            req.datasets.clone(),
         ));
 
         info!(
@@ -268,6 +268,7 @@ impl SyncService {
         symbols: Vec<String>,
         scope: SyncScope,
         buffer: Arc<tokio::sync::Mutex<BulkInsertBuffer>>,
+        datasets: Vec<DatasetType>,
     ) {
         // redis.clone() 取得副本傳給 run_manual_sync，
         // 讓它在整個同步過程中使用 AppState 已建立的連線，不自行重建。
@@ -280,6 +281,7 @@ impl SyncService {
             symbols,
             scope,
             buffer,
+            datasets,
         )
         .await;
 
@@ -357,7 +359,7 @@ mod tests {
             full_sync: true,
             from_date: None,
             to_date: None,
-            intervals: vec![],
+            datasets: vec![],
         };
         let (from, to) = SyncService::resolve_date_range(&req).unwrap();
         assert!(from.is_some());
@@ -374,7 +376,7 @@ mod tests {
             full_sync: false,
             from_date: None,
             to_date: Some("2026-01-31".to_string()),
-            intervals: vec![],
+            datasets: vec![DatasetType::TaiwanStockPrice],
         };
         assert!(matches!(
             SyncService::resolve_date_range(&req),
@@ -391,7 +393,7 @@ mod tests {
             full_sync: false,
             from_date: Some("2026-01-01".to_string()),
             to_date: None,
-            intervals: vec![],
+            datasets: vec![DatasetType::TaiwanStockPrice],
         };
         assert!(matches!(
             SyncService::resolve_date_range(&req),

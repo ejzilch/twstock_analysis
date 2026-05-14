@@ -243,6 +243,37 @@ pub enum SymbolFetchScope<'a> {
     MissingOnly(&'a [String]),
 }
 
+/// FinMind 支援的 dataset 類型，用於手動同步與排程器
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DatasetType {
+    TaiwanStockPrice,
+    TaiwanStockInstitutionalInvestorsBuySell,
+    TaiwanStockInfo,
+    TaiwanStockTradingDate,
+}
+
+impl DatasetType {
+    pub fn as_finmind_str(&self) -> &str {
+        match self {
+            DatasetType::TaiwanStockPrice => "TaiwanStockPrice",
+            DatasetType::TaiwanStockInstitutionalInvestorsBuySell => {
+                "TaiwanStockInstitutionalInvestorsBuySell"
+            }
+            DatasetType::TaiwanStockInfo => "TaiwanStockInfo",
+            DatasetType::TaiwanStockTradingDate => "TaiwanStockTradingDate",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DateColumnType {
+    /// BIGINT 毫秒級 timestamp（candles.timestamp_ms）
+    TimestampMs,
+    /// DATE 型別（institutional_investors.date）
+    Date,
+}
+
 // ── 單元測試 ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -177,7 +177,7 @@ pub async fn refresh_symbols_from_finmind(
         SymbolFetchScope::AllMarkets => {
             let api_token = std::env::var(FINMIND_API_TOKEN_ENV).unwrap_or_default();
 
-            rate_limiter.acquire().await.ok();
+            rate_limiter.acquire().await;
             let stock_info_map = fetch_stock_info_map(http_client, &api_token).await?;
             rate_limiter.mark_request_used().await;
 
@@ -242,7 +242,7 @@ pub async fn refresh_symbols_from_finmind(
 
             let api_token = std::env::var(FINMIND_API_TOKEN_ENV).unwrap_or_default();
 
-            rate_limiter.acquire().await.ok();
+            rate_limiter.acquire().await;
             let stock_info_map = fetch_stock_info_map(http_client, &api_token).await?;
             rate_limiter.mark_request_used().await;
 
