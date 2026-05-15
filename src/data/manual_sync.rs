@@ -508,6 +508,13 @@ pub async fn run_manual_sync(
                 if let Some(gap) = gap_opt {
                     match syncer.fetch_and_insert(symbol, gap, &mut ctx).await {
                         Ok(r) => {
+                            if r.inserted > 0 || r.skipped > 0 {
+                                sync_log_update_counts(
+                                    &db_pool, &sync_id, r.inserted, r.skipped, 0,
+                                )
+                                .await
+                                .unwrap_or_else(|e| warn!(error = %e, "sync_log update failed"));
+                            }
                             let progress = GapProgress {
                                 from_ms: gap
                                     .from_date
