@@ -5,7 +5,9 @@ use crate::data::datasets::{
     candles::CandlesDataset, institutional_investors::InstitutionalInvestorsDataset,
     stock_info::StockInfoDataset, trading_date::TradingDateDataset,
 };
-use crate::data::db::{sync_log_create, sync_log_update_status, SyncLogEntry};
+use crate::data::db::{
+    sync_log_create, sync_log_update_counts, sync_log_update_status, SyncLogEntry,
+};
 use crate::data::manual_sync::{load_trading_dates_5y, DateRange, SyncScope};
 use crate::data::models::current_timestamp_ms;
 use crate::data::symbol_sync::fetch_active_symbols;
@@ -278,6 +280,17 @@ async fn run_scheduled_pipeline(state: &Arc<AppState>, now: &chrono::DateTime<Lo
                     };
                     match syncer.fetch_and_insert(symbol, gap, &mut ctx).await {
                         Ok(r) => {
+                            if r.inserted > 0 || r.skipped > 0 {
+                                sync_log_update_counts(
+                                    &state.db_pool,
+                                    &sync_id,
+                                    r.inserted,
+                                    r.skipped,
+                                    0,
+                                )
+                                .await
+                                .unwrap_or_else(|e| warn!(error = %e, "sync_log update failed"));
+                            }
                             let progress = GapProgress {
                                 from_ms: gap
                                     .from_date
