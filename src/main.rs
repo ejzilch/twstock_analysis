@@ -112,14 +112,21 @@ async fn main() -> anyhow::Result<()> {
 
     // 步驟 3: Flush BulkInsertBuffer 剩餘資料
     {
-        let mut buffer = app_state.bulk_insert_buffer.lock().await;
-        let mut redis_conn = app_state.cache_invalidator()?;
-        if let Err(e) = buffer
-            .flush_and_close(&app_state.db_writer(), &mut redis_conn)
-            .await
-        {
-            tracing::error!(error = %e, "Failed to flush BulkInsertBuffer during shutdown");
-        }
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            let mut buffer = app_state.bulk_insert_buffer.lock().await;
+            if let Ok(mut redis_conn) = app_state.cache_invalidator() {
+                if let Err(e) = buffer
+                    .flush_and_close(&app_state.db_writer(), &mut redis_conn)
+                    .await
+                {
+                    tracing::error!(error = %e, "Failed to flush BulkInsertBuffer during shutdown");
+                }
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            tracing::warn!("BulkInsertBuffer flush timed out after 10s, forcing shutdown");
+        });
     }
 
     // 步驟 4: 關閉 PostgreSQL 連線池
