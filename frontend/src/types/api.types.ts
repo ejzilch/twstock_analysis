@@ -1,6 +1,6 @@
 /**
  * Business layer derived types.
- * Composed from api.generated.ts via Pick<>/Omit<> — never duplicate interface definitions.
+ * Composed from api.generated.ts via Pick<>/Omit<> - never duplicate interface definitions.
  */
 import type { components } from './api.generated'
 
@@ -20,7 +20,7 @@ export type BacktestResponse = Schemas['BacktestResponse']
 
 export type TradeRecord = Schemas['TradeRecord']
 
-// ── Enums ─────────────────────────────────────────────────────────────────────
+// Enums
 export type Interval = '1m' | '5m' | '15m' | '1h' | '4h' | '1d'
 export type Exchange = 'TWSE' | 'TPEX'
 export type SignalType = 'BUY' | 'SELL'
@@ -41,7 +41,7 @@ export type CandleWithIndicators = CandleItem & {
     }
 }
 
-// ── Indicator Types ───────────────────────────────────────────────────────────
+// Indicator Types
 export type IndicatorValue = number | MacdValue | BollingerValue
 
 export interface MacdValue {
@@ -56,7 +56,7 @@ export interface BollingerValue {
     lower: number
 }
 
-// ── Manual Sync ───────────────────────────────────────────────────────────────
+// Manual Sync
 
 export type SyncStatus =
     | 'running'
@@ -93,7 +93,7 @@ export interface RateLimitInfo {
     used_this_hour: number
     limit_per_hour: number
     is_waiting: boolean
-    /** rate limit 解除的毫秒級 timestamp，is_waiting === false 時為 null */
+    /** Millisecond timestamp when rate-limit wait ends; null if not waiting. */
     resume_at_ms: number | null
 }
 
@@ -137,7 +137,7 @@ export interface SyncStatusResponse {
     summary: SyncSummary
 }
 
-// ── Errors ────────────────────────────────────────────────────────────────────
+// Errors
 
 export type ErrorCode =
     | 'UNAUTHORIZED'
@@ -183,18 +183,70 @@ export interface BadgeConfig {
 export const RELIABILITY_BADGE: Record<ReliabilityLevel, BadgeConfig> = {
     high: { label: 'AI 高信心', color: 'green', bg: 'bg-emerald-500/15', text: 'text-emerald-400' },
     medium: { label: 'AI 中信心', color: 'yellow', bg: 'bg-amber-500/15', text: 'text-amber-400' },
-    low: { label: '技術指標', color: 'gray', bg: 'bg-slate-500/15', text: 'text-slate-400' },
-    unknown: { label: '信號異常', color: 'red', bg: 'bg-red-500/15', text: 'text-red-400' },
+    low: { label: '技術訊號', color: 'gray', bg: 'bg-slate-500/15', text: 'text-slate-400' },
+    unknown: { label: '資料不足', color: 'red', bg: 'bg-red-500/15', text: 'text-red-400' },
 }
 
-// Zustand store shape
-export interface AppState {
-    activeSyncId: string | null,
+// Dashboard layout state (UI-only, persisted)
+export type DashboardRange = number | 'max'
+
+export type DashboardLeftPanelId =
+    | 'candles'
+    | 'rsi'
+    | 'macd'
+    | 'institutionalNetFlow'
+
+export type DashboardIndicatorId =
+    | 'ma5'
+    | 'ma20'
+    | 'ma50'
+    | 'bollinger'
+    | 'rsi'
+    | 'macd'
+
+export type DashboardRightWidgetId =
+    | 'aiPrediction'
+    | 'shareholdingRatio'
+    | 'monthlyRevenue'
+    | 'peAnalysis'
+
+export type DashboardRightGridPreset = '1x1' | '2x2' | '3x3' | '4x4'
+
+export interface DashboardRightWidgetLayout {
+    id: DashboardRightWidgetId
+    visible: boolean
+    x: number
+    y: number
+    w: number
+    h: number
+    minW: number
+    minH: number
+}
+
+export interface DashboardLayoutState {
+    splitRatio: number
+    selectedRange: DashboardRange
+    leftPanelOrder: DashboardLeftPanelId[]
+    leftPanelVisible: Record<DashboardLeftPanelId, boolean>
+    indicatorVisible: Record<DashboardIndicatorId, boolean>
+    rightGridPreset: DashboardRightGridPreset
+    rightWidgets: DashboardRightWidgetLayout[]
+}
+
+export interface AppStorePersistedStateV2 {
+    activeSyncId: string | null
     selectedSymbol: string
     selectedInterval: string
     isEcoModeEnabled: boolean
     apiKey: string
     colorMode: 'TW' | 'US'
+    dashboardLayout: DashboardLayoutState
+}
+
+export type AppStorePersistedState = AppStorePersistedStateV2
+
+// Zustand store shape
+export interface AppState extends AppStorePersistedState {
     setActiveSyncId: (id: string | null) => void
     toggleColorMode: () => void
     setSelectedSymbol: (symbol: string) => void
@@ -202,7 +254,18 @@ export interface AppState {
     toggleEcoMode: () => void
     setApiKey: (key: string) => void
 
-    // 排程（不 persist）
+    setDashboardSplitRatio: (ratio: number) => void
+    setDashboardSelectedRange: (range: DashboardRange) => void
+    setDashboardLeftPanelOrder: (order: DashboardLeftPanelId[]) => void
+    setDashboardLeftPanelVisible: (panelId: DashboardLeftPanelId, visible: boolean) => void
+    setDashboardIndicatorVisible: (indicatorId: DashboardIndicatorId, visible: boolean) => void
+    setDashboardRightGridPreset: (preset: DashboardRightGridPreset) => void
+    setDashboardRightWidgets: (widgets: DashboardRightWidgetLayout[]) => void
+    upsertDashboardRightWidget: (widget: DashboardRightWidgetLayout) => void
+    setDashboardRightWidgetVisible: (widgetId: DashboardRightWidgetId, visible: boolean) => void
+    resetDashboardLayout: () => void
+
+    // schedule state: backend is source of truth (not persisted)
     scheduleEnabled: boolean
     scheduleTime: string
     scheduleLoaded: boolean

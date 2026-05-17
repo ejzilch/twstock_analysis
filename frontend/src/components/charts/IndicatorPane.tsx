@@ -115,13 +115,6 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
 
     return (
         <div className="w-full">
-            {/* Label row */}
-            <div className="px-3 py-1 text-xs text-slate-500 uppercase tracking-wider font-medium">
-                {type === 'rsi14'
-                    ? 'RSI (14) 超賣 < 30% , 超買 > 70%'
-                    : 'MACD (12,26,9) 紅：快線 (MACD Line / DIF) , 綠：慢線 (Signal Line / DEA) , 柱狀圖 (Histogram / OSC)'}
-            </div>
-
             {/* Chart area — relative so the tooltip anchors inside it */}
             <div className="relative">
                 <div ref={containerRef} style={{ height }} className="w-full" />
