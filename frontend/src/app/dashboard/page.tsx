@@ -17,7 +17,7 @@ import { LoadingSpinner, ErrorToast, Card } from '@/src/components/ui'
 // 工具與型別
 import { ApiErrorException } from '@/src/lib/api-client'
 import type { CrosshairData } from '@/src/hooks/useChartSync'
-import type { DashboardLeftPanelId } from '@/src/types/api.types'
+import type { DashboardLeftPanelId, DashboardRightGridPreset, DashboardRightWidgetId } from '@/src/types/api.types'
 
 const TIME_RANGES = [
     { label: '1D', value: 1 },
@@ -39,6 +39,21 @@ const LEFT_LABEL: Record<DashboardLeftPanelId, string> = {
     rsi: 'RSI (14)',
     macd: 'MACD (12,26,9)',
     institutionalNetFlow: 'Institutional Net Flow',
+}
+
+const RIGHT_WIDGET_META: Record<DashboardRightWidgetId, { title: string; subtitle: string }> = {
+    aiPrediction: { title: 'AI 預測概覽', subtitle: '現有' },
+    shareholdingRatio: { title: '股權持股比例', subtitle: '待接入資料' },
+    monthlyRevenue: { title: '月營收明細', subtitle: '待接入資料' },
+    peAnalysis: { title: '本益比分析', subtitle: '待接入資料' },
+}
+
+const RIGHT_GRID_PRESETS: DashboardRightGridPreset[] = ['1x1', '2x2', '3x3']
+
+function getRightColumns(preset: DashboardRightGridPreset): number {
+    if (preset === '1x1') return 1
+    if (preset === '2x2') return 2
+    return 3
 }
 
 function isDataSourceError(error: unknown): boolean {
@@ -97,11 +112,29 @@ export default function DashboardPage() {
     const leftPanelVisible = useAppStore((s) => s.dashboardLayout.leftPanelVisible)
     const setLeftPanelOrder = useAppStore((s) => s.setDashboardLeftPanelOrder)
     const setLeftPanelVisible = useAppStore((s) => s.setDashboardLeftPanelVisible)
+    const rightGridPreset = useAppStore((s) => s.dashboardLayout.rightGridPreset)
+    const setRightGridPreset = useAppStore((s) => s.setDashboardRightGridPreset)
+    const rightWidgets = useAppStore((s) => s.dashboardLayout.rightWidgets)
+    const setRightWidgetVisible = useAppStore((s) => s.setDashboardRightWidgetVisible)
+    const setRightWidgets = useAppStore((s) => s.setDashboardRightWidgets)
 
     const [leftMenuOpen, setLeftMenuOpen] = useState(false)
     const leftMenuRef = useRef<HTMLDivElement>(null)
     const [draggingPanel, setDraggingPanel] = useState<DashboardLeftPanelId | null>(null)
     const [crosshairData, setCrosshairData] = useState<CrosshairData | null>(null)
+
+    const [rightMenuOpen, setRightMenuOpen] = useState(false)
+    const rightMenuRef = useRef<HTMLDivElement>(null)
+    const [draggingRight, setDraggingRight] = useState<DashboardRightWidgetId | null>(null)
+    // 右側 widget 高度 state（以 id 為 key）
+    const [widgetHeights, setWidgetHeights] = useState<Record<string, number>>({
+        aiPrediction: 240, shareholdingRatio: 200, monthlyRevenue: 200, peAnalysis: 200,
+    })
+    // 右側 widget 寬度倍數（1 = 1欄, 2 = 2欄）
+    const [widgetSpans, setWidgetSpans] = useState<Record<string, number>>({
+        aiPrediction: 1, shareholdingRatio: 1, monthlyRevenue: 1, peAnalysis: 1,
+    })
+
     const containerRef = useRef<HTMLDivElement>(null)
     const [isDraggingSplitter, setIsDraggingSplitter] = useState(false)
     const [dragRatio, setDragRatio] = useState(splitRatio)
@@ -127,6 +160,15 @@ export default function DashboardPage() {
         const onOutside = (e: MouseEvent) => {
             const target = e.target as Node
             if (leftMenuRef.current && !leftMenuRef.current.contains(target)) setLeftMenuOpen(false)
+        }
+        document.addEventListener('mousedown', onOutside)
+        return () => document.removeEventListener('mousedown', onOutside)
+    }, [])
+
+    useEffect(() => {
+        const onOutside = (e: MouseEvent) => {
+            if (rightMenuRef.current && !rightMenuRef.current.contains(e.target as Node))
+                setRightMenuOpen(false)
         }
         document.addEventListener('mousedown', onOutside)
         return () => document.removeEventListener('mousedown', onOutside)
@@ -178,6 +220,65 @@ export default function DashboardPage() {
     const hasRsi = candles.some((c: any) => c.indicators?.['rsi14'] != null)
     const hasMacd = candles.some((c: any) => c.indicators?.['macd'] != null)
     const showLatencyBanner = isDataSourceError(candlesQuery.error) || candlesQuery.data?.cached === true
+
+    const rightColumns = getRightColumns(rightGridPreset)
+
+    function makeResizeHandler(
+        id: string,
+        initialH: number,
+        initialW: number,
+        corner: 'bottom' | 'right' | 'corner',
+        columns: number,
+    ) {
+        return (e: React.MouseEvent) => {
+            e.preventDefault()
+            const startX = e.clientX
+            const startY = e.clientY
+            const onMove = (ev: MouseEvent) => {
+                const dy = ev.clientY - startY
+                const dx = ev.clientX - startX
+                if (corner === 'bottom' || corner === 'corner') {
+                    setWidgetHeights((prev) => ({ ...prev, [id]: Math.max(120, initialH + dy) }))
+                }
+                if (corner === 'right' || corner === 'corner') {
+                    // 每 120px 算一欄
+                    const newSpan = Math.min(columns, Math.max(1, initialW + Math.round(dx / 120)))
+                    setWidgetSpans((prev) => ({ ...prev, [id]: newSpan }))
+                }
+            }
+            const onUp = () => {
+                window.removeEventListener('mousemove', onMove)
+                window.removeEventListener('mouseup', onUp)
+            }
+            window.addEventListener('mousemove', onMove)
+            window.addEventListener('mouseup', onUp)
+        }
+    }
+
+    const [rightOrder, setRightOrder] = useState<DashboardRightWidgetId[]>(
+        rightWidgets.map((w) => w.id)
+    )
+
+
+    function reorderRightWidgets(
+        fromId: DashboardRightWidgetId,
+        toId: DashboardRightWidgetId,
+    ) {
+        if (fromId === toId) return
+        setRightOrder((prev) => {
+            const next = [...prev]
+            const fi = next.indexOf(fromId)
+            const ti = next.indexOf(toId)
+            if (fi < 0 || ti < 0) return prev
+            const [moved] = next.splice(fi, 1)
+            next.splice(ti, 0, moved)
+            return next
+        })
+    }
+
+    const visibleRightWidgets = rightOrder
+        .map((id) => rightWidgets.find((w) => w.id === id))
+        .filter((w): w is typeof rightWidgets[0] => !!w && w.visible)
 
     return (
         <div className="flex h-full flex-col">
@@ -285,7 +386,7 @@ export default function DashboardPage() {
                                                 <span className="text-xs font-medium uppercase tracking-wider text-slate-400">{symbol} · {interval.toUpperCase()}</span>
                                                 <span className="text-xs text-slate-600">{candles.length} bars</span>
                                             </div>
-                                            <CandleChart candles={candles} signals={signals} height={500} visibleIndicators={visibleIndicators} sync={chartSync} showTooltip={false} />
+                                            <CandleChart candles={candles} signals={signals} visibleIndicators={visibleIndicators} sync={chartSync} showTooltip={false} />
                                         </Card>
                                     )}
                                     {id === 'rsi' && hasRsi && (
@@ -337,10 +438,146 @@ export default function DashboardPage() {
                 </div>
 
                 <aside className="min-w-[300px] overflow-y-auto px-4 py-5" style={{ width: rightWidth }}>
-                    <PredictionPanel signals={signals} />
+                    {/* ── 右側頂部工具列 ── */}
+                    <div className="mb-3 flex items-center gap-2">
+                        <h2 className="text-xs uppercase tracking-wider text-slate-400 flex-1">財務資訊 (右側區)</h2>
+
+                        {/* 格線切換 */}
+                        <div className="flex items-center gap-1 rounded-md border border-surface-border bg-surface-card p-0.5">
+                            {RIGHT_GRID_PRESETS.map((preset) => (
+                                <button
+                                    key={preset}
+                                    onClick={() => setRightGridPreset(preset)}
+                                    className={clsx(
+                                        'rounded px-2 py-1 text-[11px] transition',
+                                        rightGridPreset === preset
+                                            ? 'bg-brand-600 text-white'
+                                            : 'text-slate-400 hover:bg-surface-hover hover:text-slate-200',
+                                    )}
+                                >
+                                    {preset}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* 顯/隱設定 */}
+                        <div className="relative" ref={rightMenuRef}>
+                            <button
+                                onClick={() => setRightMenuOpen((v) => !v)}
+                                className="group flex items-center gap-1.5 rounded border border-surface-border px-2.5 py-1.5 text-xs text-slate-300 hover:bg-surface-hover"
+                            >
+                                <IconSettings size={14} stroke={1.5} className="text-slate-400 group-hover:text-white transition-transform group-hover:rotate-45 duration-200" />
+                                <span>顯/隱</span>
+                            </button>
+                            {rightMenuOpen && (
+                                <div className="absolute right-0 z-20 mt-1 min-w-[200px] rounded-md border border-surface-border bg-surface-card p-2 shadow-xl">
+                                    {rightWidgets.map((w) => (
+                                        <label key={w.id} className="flex items-center gap-2 px-1 py-1 text-xs cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={w.visible}
+                                                onChange={() => setRightWidgetVisible(w.id, !w.visible)}
+                                            />
+                                            <span className="text-slate-200">{RIGHT_WIDGET_META[w.id].title}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* ── Widget 格線 ── */}
+                    <div
+                        className="grid gap-3"
+                        style={{ gridTemplateColumns: `repeat(${rightColumns}, minmax(0, 1fr))` }}
+                    >
+                        {visibleRightWidgets.map((widget) => {
+                            const id = widget.id
+                            const h = widgetHeights[id] ?? 200
+                            const span = Math.min(widgetSpans[id] ?? 1, rightColumns)
+
+                            return (
+                                <div
+                                    key={id}
+                                    style={{ gridColumn: `span ${span}` }}
+                                    className={clsx(
+                                        'relative rounded-xl border border-surface-border bg-surface-card overflow-visible',
+                                        draggingRight === id && 'border-brand-500/40 bg-brand-500/5',
+                                    )}
+                                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+                                    onDrop={(e) => {
+                                        e.preventDefault()
+                                        const dragged = (e.dataTransfer.getData('text/plain') || draggingRight) as DashboardRightWidgetId | null
+                                        if (dragged) { reorderRightWidgets(dragged, id); setDraggingRight(null) }
+                                    }}
+                                >
+                                    {/* Header（可拖曳） */}
+                                    <div
+                                        draggable
+                                        onDragStart={(e) => {
+                                            setDraggingRight(id)
+                                            e.dataTransfer.effectAllowed = 'move'
+                                            e.dataTransfer.setData('text/plain', id)
+                                        }}
+                                        onDragEnd={() => setDraggingRight(null)}
+                                        className="flex cursor-move items-center gap-2 border-b border-surface-border px-3 py-2 hover:bg-surface-hover/60 rounded-t-xl"
+                                    >
+                                        <span className="text-slate-500 text-sm">⋮⋮</span>
+                                        <span className="text-xs font-medium uppercase tracking-wider text-slate-400 flex-1">
+                                            {RIGHT_WIDGET_META[id].title}
+                                        </span>
+                                        <span className="text-[11px] text-slate-600">{RIGHT_WIDGET_META[id].subtitle}</span>
+                                    </div>
+
+                                    {/* Body */}
+                                    <div style={{ height: h }} className="overflow-auto p-3">
+                                        {id === 'aiPrediction' && <PredictionPanel signals={signals} />}
+                                        {id === 'shareholdingRatio' && (
+                                            <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                                                股權持股比例：待接入資料
+                                            </div>
+                                        )}
+                                        {id === 'monthlyRevenue' && (
+                                            <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                                                月營收明細：待接入資料
+                                            </div>
+                                        )}
+                                        {id === 'peAnalysis' && (
+                                            <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                                                本益比分析：待接入資料
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* 底部 resize handle */}
+                                    <div
+                                        onMouseDown={makeResizeHandler(id, h, widgetSpans[id] ?? 1, 'bottom', rightColumns)}
+                                        className="absolute bottom-0 left-4 right-4 h-1.5 cursor-row-resize hover:bg-brand-500/40 transition-colors rounded-b"
+                                    />
+                                    {/* 右側 resize handle */}
+                                    <div
+                                        onMouseDown={makeResizeHandler(id, h, widgetSpans[id] ?? 1, 'right', rightColumns)}
+                                        className="absolute right-0 top-8 bottom-4 w-1.5 cursor-col-resize hover:bg-brand-500/40 transition-colors rounded-r"
+                                    />
+                                    {/* 右下角 resize handle */}
+                                    <div
+                                        onMouseDown={makeResizeHandler(id, h, widgetSpans[id] ?? 1, 'corner', rightColumns)}
+                                        className="absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize hover:bg-brand-500/60 transition-colors rounded-br"
+                                    />
+                                </div>
+                            )
+                        })}
+                    </div>
+
+                    {/* ── 訊號清單 ── */}
                     <div className="mt-4">
-                        <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-slate-400">Signals ({signals.length})</h2>
-                        {signalsQuery.isLoading ? <LoadingSpinner label="Loading signals..." /> : <SignalList signals={signals} />}
+                        <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-slate-400">
+                            訊號清單 ({signals.length})
+                        </h2>
+                        {signalsQuery.isLoading
+                            ? <LoadingSpinner label="載入訊號..." />
+                            : <SignalList signals={signals} />
+                        }
                     </div>
                 </aside>
             </section>

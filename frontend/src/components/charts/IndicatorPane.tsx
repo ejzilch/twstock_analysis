@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { CandleItem } from '@/src/types/api.types'
 import { Time } from 'lightweight-charts';
 import { BASE_INDICATOR_COLORS, ColorMode, getThemedIndicatorColor } from '@/src/constants/chartColors'
@@ -18,8 +18,31 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
     const colorMode = useAppStore((s) => s.colorMode)
     const containerRef = useRef<HTMLDivElement>(null)
     const chartRef = useRef<any>(null)
-    const height = type === 'rsi14' ? 160 : 180
     const mc = getThemedIndicatorColor(colorMode ?? 'TW')
+    const [height, setHeight] = useState(type === 'rsi14' ? 160 : 180)
+    const isDraggingRef = useRef(false)
+    const startYRef = useRef(0)
+    const startHRef = useRef(0)
+
+    const handleResizeMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault()
+        isDraggingRef.current = true
+        startYRef.current = e.clientY
+        startHRef.current = height
+
+        const onMove = (ev: MouseEvent) => {
+            if (!isDraggingRef.current) return
+            const delta = ev.clientY - startYRef.current
+            setHeight(Math.max(80, startHRef.current + delta))
+        }
+        const onUp = () => {
+            isDraggingRef.current = false
+            window.removeEventListener('mousemove', onMove)
+            window.removeEventListener('mouseup', onUp)
+        }
+        window.addEventListener('mousemove', onMove)
+        window.addEventListener('mouseup', onUp)
+    }
 
     useEffect(() => {
         if (!containerRef.current || candles.length === 0) return
@@ -115,16 +138,18 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
 
     return (
         <div className="w-full">
-            {/* Chart area — relative so the tooltip anchors inside it */}
             <div className="relative">
                 <div ref={containerRef} style={{ height }} className="w-full" />
-
-                {/* Fixed top-left overlay tooltip */}
                 {type === 'rsi14'
                     ? <RsiTooltip sync={sync} mc={mc} />
                     : <MacdTooltip sync={sync} mc={mc} />
                 }
             </div>
+            <div
+                onMouseDown={handleResizeMouseDown}
+                className="h-1.5 w-full cursor-row-resize bg-transparent hover:bg-brand-500/30 transition-colors rounded-b"
+                title="拖曳調整高度"
+            />
         </div>
     )
 }

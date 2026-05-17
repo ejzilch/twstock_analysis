@@ -54,6 +54,28 @@ export function CandleChart({
     })
     const colorMode = useAppStore((s) => s.colorMode)
 
+    const [liveHeight, setLiveHeight] = useState(height)
+    const isDraggingRef = useRef(false)
+    const startYRef = useRef(0)
+    const startHRef = useRef(0)
+    const handleResizeMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault()
+        isDraggingRef.current = true
+        startYRef.current = e.clientY
+        startHRef.current = liveHeight
+        const onMove = (ev: MouseEvent) => {
+            if (!isDraggingRef.current) return
+            setLiveHeight(Math.max(200, startHRef.current + (ev.clientY - startYRef.current)))
+        }
+        const onUp = () => {
+            isDraggingRef.current = false
+            window.removeEventListener('mousemove', onMove)
+            window.removeEventListener('mouseup', onUp)
+        }
+        window.addEventListener('mousemove', onMove)
+        window.addEventListener('mouseup', onUp)
+    }
+
     const hasAlignedRef = useRef(false)
     const chartReadyRef = useRef(false)
     const [chartReadyTick, setChartReadyTick] = useState(0)
@@ -86,7 +108,7 @@ export function CandleChart({
 
             const chart = createChart(containerRef.current, {
                 width: containerRef.current.clientWidth,
-                height,
+                height: liveHeight,
                 layout: {
                     background: { color: CHART_THEME.background },
                     textColor: CHART_THEME.textColor,
@@ -190,8 +212,14 @@ export function CandleChart({
         }
     }, [height, colorMode, showVolume])
 
+    // ── Effect 2：同步 liveHeight → chart ──────────────────────────────
+    useEffect(() => {
+        if (!chartReadyRef.current || !chartRef.current) return
+        chartRef.current.applyOptions({ height: liveHeight })
+    }, [liveHeight])
 
-    // ── Effect 2：更新資料 ────────────────────────────────────────────────────
+
+    // ── Effect 3：更新資料 ────────────────────────────────────────────────────
     useEffect(() => {
         if (!chartReadyRef.current) return
 
@@ -294,11 +322,8 @@ export function CandleChart({
     }, [chartReadyTick, candles, signals, visibleIndicators, colorMode, markerTextMode])
 
     return (
-        // relative — 讓 CandleTooltip absolute 定位能吸附在這個容器左上
         <div className="relative">
-            <div ref={containerRef} style={{ height }} className="w-full rounded-lg overflow-hidden" />
-
-            {/* Fixed top-left overlay */}
+            <div ref={containerRef} style={{ height: liveHeight }} className="w-full rounded-lg overflow-hidden" />
             {showTooltip && (
                 <CandleTooltip
                     sync={sync}
@@ -306,6 +331,12 @@ export function CandleChart({
                     visibleIndicators={visibleIndicators}
                 />
             )}
+            {/* 底部拖曳縮放 handle */}
+            <div
+                onMouseDown={handleResizeMouseDown}
+                className="h-2 w-full cursor-row-resize bg-transparent hover:bg-brand-500/30 transition-colors"
+                title="拖曳調整高度"
+            />
         </div>
     )
 }
