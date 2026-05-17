@@ -21,6 +21,7 @@ interface CandleChartProps {
     markerTextMode?: 'signalWithConfidence' | 'signalOnly'
     visibleIndicators?: Set<string>
     sync?: ChartSyncHandle
+    showTooltip?: boolean
 }
 
 interface SeriesRefs {
@@ -42,6 +43,7 @@ export function CandleChart({
     markerTextMode = 'signalWithConfidence',
     visibleIndicators,
     sync,
+    showTooltip = true,
 }: CandleChartProps) {
     const containerRef = useRef<HTMLDivElement>(null)
     const chartRef = useRef<IChartApi | null>(null)
@@ -297,11 +299,13 @@ export function CandleChart({
             <div ref={containerRef} style={{ height }} className="w-full rounded-lg overflow-hidden" />
 
             {/* Fixed top-left overlay */}
-            <CandleTooltip
-                sync={sync}
-                colorMode={colorMode}
-                visibleIndicators={visibleIndicators}
-            />
+            {showTooltip && (
+                <CandleTooltip
+                    sync={sync}
+                    colorMode={colorMode}
+                    visibleIndicators={visibleIndicators}
+                />
+            )}
         </div>
     )
 }
