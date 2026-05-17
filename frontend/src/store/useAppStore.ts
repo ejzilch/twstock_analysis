@@ -22,7 +22,7 @@ const APP_STORE_PERSIST_VERSION = 2
 const VALID_INTERVALS = new Set(['1m', '5m', '15m', '1h', '4h', '1d'])
 const DASHBOARD_LEFT_PANEL_IDS: DashboardLeftPanelId[] = ['candles', 'rsi', 'macd', 'institutionalNetFlow']
 const DASHBOARD_INDICATOR_IDS: DashboardIndicatorId[] = ['ma5', 'ma20', 'ma50', 'bollinger', 'rsi', 'macd']
-const DASHBOARD_RIGHT_WIDGET_IDS: DashboardRightWidgetId[] = ['aiPrediction', 'shareholdingRatio', 'monthlyRevenue', 'peAnalysis']
+const DASHBOARD_RIGHT_WIDGET_IDS: DashboardRightWidgetId[] = ['aiPrediction', 'shareholdingRatio', 'monthlyRevenue', 'peAnalysis', 'signalList']
 const DASHBOARD_GRID_COLUMNS: Record<DashboardRightGridPreset, number> = {
     '1x1': 1,
     '2x2': 2,
@@ -54,6 +54,7 @@ const DEFAULT_DASHBOARD_LAYOUT: DashboardLayoutState = {
         { id: 'shareholdingRatio', visible: true, x: 0, y: 1, w: 1, h: 1, minW: 1, minH: 1 },
         { id: 'monthlyRevenue', visible: true, x: 1, y: 1, w: 1, h: 1, minW: 1, minH: 1 },
         { id: 'peAnalysis', visible: true, x: 0, y: 2, w: 2, h: 1, minW: 1, minH: 1 },
+        { id: 'signalList', visible: true, x: 0, y: 3, w: 2, h: 2, minW: 1, minH: 1 },
     ],
 }
 

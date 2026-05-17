@@ -46,6 +46,7 @@ const RIGHT_WIDGET_META: Record<DashboardRightWidgetId, { title: string; subtitl
     shareholdingRatio: { title: '股權持股比例', subtitle: '待接入資料' },
     monthlyRevenue: { title: '月營收明細', subtitle: '待接入資料' },
     peAnalysis: { title: '本益比分析', subtitle: '待接入資料' },
+    signalList: { title: '訊號清單', subtitle: '' },
 }
 
 const RIGHT_GRID_PRESETS: DashboardRightGridPreset[] = ['1x1', '2x2', '3x3']
@@ -128,11 +129,11 @@ export default function DashboardPage() {
     const [draggingRight, setDraggingRight] = useState<DashboardRightWidgetId | null>(null)
     // 右側 widget 高度 state（以 id 為 key）
     const [widgetHeights, setWidgetHeights] = useState<Record<string, number>>({
-        aiPrediction: 240, shareholdingRatio: 200, monthlyRevenue: 200, peAnalysis: 200,
+        aiPrediction: 240, shareholdingRatio: 200, monthlyRevenue: 200, peAnalysis: 200, signalList: 320,
     })
     // 右側 widget 寬度倍數（1 = 1欄, 2 = 2欄）
     const [widgetSpans, setWidgetSpans] = useState<Record<string, number>>({
-        aiPrediction: 1, shareholdingRatio: 1, monthlyRevenue: 1, peAnalysis: 1,
+        aiPrediction: 1, shareholdingRatio: 1, monthlyRevenue: 1, peAnalysis: 1, signalList: 1,
     })
 
     const containerRef = useRef<HTMLDivElement>(null)
@@ -382,7 +383,7 @@ export default function DashboardPage() {
                                 }}>
                                     {id === 'candles' && (
                                         <Card padding={false} className="overflow-hidden">
-                                            <div draggable onDragStart={(e) => { setDraggingPanel(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id) }} onDragEnd={() => setDraggingPanel(null)} className="flex cursor-move items-center justify-between border-b border-surface-border px-4 py-3 hover:bg-surface-hover/60">
+                                            <div draggable onDragStart={(e) => { setDraggingPanel(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id) }} onDragEnd={() => setDraggingPanel(null)} className="flex cursor-grab active:cursor-grabbing items-center justify-between border-b border-surface-border px-4 py-3 hover:bg-surface-hover/60">
                                                 <span className="text-xs font-medium uppercase tracking-wider text-slate-400">{symbol} · {interval.toUpperCase()}</span>
                                                 <span className="text-xs text-slate-600">{candles.length} bars</span>
                                             </div>
@@ -391,7 +392,7 @@ export default function DashboardPage() {
                                     )}
                                     {id === 'rsi' && hasRsi && (
                                         <Card padding={false} className="overflow-hidden">
-                                            <div draggable onDragStart={(e) => { setDraggingPanel(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id) }} onDragEnd={() => setDraggingPanel(null)} className="flex cursor-move items-center justify-between border-b border-surface-border px-4 py-3 hover:bg-surface-hover/60">
+                                            <div draggable onDragStart={(e) => { setDraggingPanel(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id) }} onDragEnd={() => setDraggingPanel(null)} className="flex cursor-grab active:cursor-grabbing items-center justify-between border-b border-surface-border px-4 py-3 hover:bg-surface-hover/60">
                                                 <span className="text-xs font-medium uppercase tracking-wider text-slate-400">{LEFT_LABEL[id]}</span>
                                                 <span className="text-slate-500 text-[11px] flex items-center gap-1.5">
                                                     <span className="text-emerald-500">小於 30% 超賣</span>
@@ -404,7 +405,7 @@ export default function DashboardPage() {
                                     )}
                                     {id === 'macd' && hasMacd && (
                                         <Card padding={false} className="overflow-hidden">
-                                            <div draggable onDragStart={(e) => { setDraggingPanel(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id) }} onDragEnd={() => setDraggingPanel(null)} className="flex cursor-move items-center justify-between border-b border-surface-border px-4 py-3 hover:bg-surface-hover/60">
+                                            <div draggable onDragStart={(e) => { setDraggingPanel(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id) }} onDragEnd={() => setDraggingPanel(null)} className="flex cursor-grab active:cursor-grabbing items-center justify-between border-b border-surface-border px-4 py-3 hover:bg-surface-hover/60">
                                                 <span className="text-xs font-medium uppercase tracking-wider text-slate-400">{LEFT_LABEL[id]}</span>
                                                 <span className="text-slate-500 text-[11px] flex items-center gap-1.5">
                                                     <span>[</span>
@@ -421,7 +422,7 @@ export default function DashboardPage() {
                                     )}
                                     {id === 'institutionalNetFlow' && (
                                         <Card padding={false} className="overflow-hidden">
-                                            <div draggable onDragStart={(e) => { setDraggingPanel(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id) }} onDragEnd={() => setDraggingPanel(null)} className="flex cursor-move items-center justify-between border-b border-surface-border px-4 py-3 hover:bg-surface-hover/60">
+                                            <div draggable onDragStart={(e) => { setDraggingPanel(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id) }} onDragEnd={() => setDraggingPanel(null)} className="flex cursor-grab active:cursor-grabbing items-center justify-between border-b border-surface-border px-4 py-3 hover:bg-surface-hover/60">
                                                 <span className="text-xs font-medium uppercase tracking-wider text-slate-400">{LEFT_LABEL[id]}</span>
                                             </div>
                                             <div className="py-10 text-center text-sm text-slate-500">Placeholder panel</div>
@@ -520,13 +521,16 @@ export default function DashboardPage() {
                                             e.dataTransfer.setData('text/plain', id)
                                         }}
                                         onDragEnd={() => setDraggingRight(null)}
-                                        className="flex cursor-move items-center gap-2 border-b border-surface-border px-3 py-2 hover:bg-surface-hover/60 rounded-t-xl"
+                                        className="flex cursor-grab active:cursor-grabbing items-center gap-2 border-b border-surface-border px-3 py-2 hover:bg-surface-hover/60 rounded-t-xl"
                                     >
-                                        <span className="text-slate-500 text-sm">⋮⋮</span>
                                         <span className="text-xs font-medium uppercase tracking-wider text-slate-400 flex-1">
                                             {RIGHT_WIDGET_META[id].title}
                                         </span>
-                                        <span className="text-[11px] text-slate-600">{RIGHT_WIDGET_META[id].subtitle}</span>
+                                        <span className="text-[11px] text-slate-600">
+                                            {id === 'signalList'
+                                                ? `${signals.length} 筆`
+                                                : RIGHT_WIDGET_META[id].subtitle}
+                                        </span>
                                     </div>
 
                                     {/* Body */}
@@ -546,6 +550,11 @@ export default function DashboardPage() {
                                             <div className="flex h-full items-center justify-center text-sm text-slate-500">
                                                 本益比分析：待接入資料
                                             </div>
+                                        )}
+                                        {id === 'signalList' && (
+                                            signalsQuery.isLoading
+                                                ? <LoadingSpinner label="載入訊號..." />
+                                                : <SignalList signals={signals} />
                                         )}
                                     </div>
 
@@ -567,17 +576,6 @@ export default function DashboardPage() {
                                 </div>
                             )
                         })}
-                    </div>
-
-                    {/* ── 訊號清單 ── */}
-                    <div className="mt-4">
-                        <h2 className="mb-2 text-xs font-medium uppercase tracking-wider text-slate-400">
-                            訊號清單 ({signals.length})
-                        </h2>
-                        {signalsQuery.isLoading
-                            ? <LoadingSpinner label="載入訊號..." />
-                            : <SignalList signals={signals} />
-                        }
                     </div>
                 </aside>
             </section>
