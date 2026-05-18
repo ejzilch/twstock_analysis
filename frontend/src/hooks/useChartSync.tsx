@@ -22,6 +22,8 @@ export interface ChartSyncHandle {
     unregister: (chart: IChartApi) => void
     // Subscribe crosshair 資料，回傳 unsubscribe fn
     subscribeCrosshairData: (cb: (data: CrosshairData | null) => void) => () => void
+    setSymbol: () => void
+    markDataReady: () => void
 }
 
 export function useChartSync(): ChartSyncHandle {
@@ -30,6 +32,14 @@ export function useChartSync(): ChartSyncHandle {
     const maxLogicalRef = useRef<Map<IChartApi, number>>(new Map())
     const isSyncingRef = useRef(false)
     const dataLengthRef = useRef(0)
+    const lastRangeRef = useRef<{ from: number; to: number } | null>(null)
+    const isDataReadyRef = useRef(false)
+    const markDataReady = useCallback(() => {
+        isDataReadyRef.current = true
+    }, [])
+    const setSymbol = useCallback(() => {
+        isDataReadyRef.current = false
+    }, [])
 
     // ── CrosshairData 訂閱清單 ────────────────────────────────────────────────
     const crosshairListeners = useRef<Set<(data: CrosshairData | null) => void>>(new Set())
@@ -38,7 +48,7 @@ export function useChartSync(): ChartSyncHandle {
         crosshairListeners.current.add(cb)
         return () => { crosshairListeners.current.delete(cb) }
     }, [])
-
+    const isApplyingRef = useRef(false)
     const broadcastCrosshair = useCallback((data: CrosshairData | null) => {
         crosshairListeners.current.forEach(cb => cb(data))
     }, [])
@@ -52,15 +62,34 @@ export function useChartSync(): ChartSyncHandle {
         chartsRef.current.set(chart, series)
         seriesRef.current.set(chart, series)
 
+        if (lastRangeRef.current) {
+            const rangeToApply = { ...lastRangeRef.current }
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    if (chartsRef.current.has(chart)) {
+                        isApplyingRef.current = true
+                        chart.timeScale().setVisibleLogicalRange(rangeToApply)
+                        requestAnimationFrame(() => {
+                            isApplyingRef.current = false
+                        })
+                    }
+                })
+            })
+        }
+
         // ── 同步 timeScale ─────────────────────────────────────────────────
         chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
             if (!range || isSyncingRef.current) return
-
             isSyncingRef.current = true
-            chartsRef.current.forEach((_, other) => {
-                if (other === chart) return
-                other.timeScale().setVisibleLogicalRange(range)
+
+            if (isDataReadyRef.current) {
+                lastRangeRef.current = { from: range.from, to: range.to }
+            }
+
+            chartsRef.current.forEach((_, target) => {
+                target.timeScale().setVisibleLogicalRange(range)
             })
+
             setTimeout(() => { isSyncingRef.current = false }, 0)
         })
 
@@ -145,7 +174,7 @@ export function useChartSync(): ChartSyncHandle {
         dataLengthRef.current = candles.length
     }, [])
 
-    return { register, unregister, subscribeCrosshairData, feedCandleMap } as ChartSyncHandle & {
+    return { register, unregister, subscribeCrosshairData, feedCandleMap, setSymbol, markDataReady } as ChartSyncHandle & {
         feedCandleMap: typeof feedCandleMap
     }
 }

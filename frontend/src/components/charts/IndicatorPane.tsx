@@ -70,6 +70,7 @@ export function IndicatorPane({ candles, type, sync }: IndicatorPaneProps) {
                     timeVisible: true,
                     secondsVisible: false,
                     rightOffset: 0,
+                    barSpacing: containerRef.current.clientWidth / 88,
                 },
             })
 

@@ -281,6 +281,19 @@ export default function DashboardPage() {
         .map((id) => rightWidgets.find((w) => w.id === id))
         .filter((w): w is typeof rightWidgets[0] => !!w && w.visible)
 
+    useEffect(() => {
+        chartSync.setSymbol()
+    }, [symbol])
+
+    useEffect(() => {
+        if (!candlesQuery.isSuccess || candles.length === 0) return
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                chartSync.markDataReady()
+            })
+        })
+    }, [candlesQuery.isSuccess, symbol])
+
     return (
         <div className="flex h-full flex-col">
             <header className="sticky top-0 z-10 border-b border-surface-border bg-surface-card/80 px-6 py-4 backdrop-blur-sm">
